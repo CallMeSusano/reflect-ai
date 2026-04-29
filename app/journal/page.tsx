@@ -2,19 +2,9 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { collection, query, where, getDocs, orderBy } from "firebase/firestore";
+import { collection, query, getDocs, orderBy } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "@/firebase";
-import { Button } from "@/components/ui/button";
-import {
-  Table,
-  TableBody,
-  TableCaption,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
 interface JournalEntry {
   id: string;
@@ -22,6 +12,26 @@ interface JournalEntry {
   mood: string;
   content: string;
   createdAt: string;
+}
+
+const MOOD_PALETTES: Record<string, { bg: string; text: string; badge: string }> = {
+  happy:    { bg: "#FFFBEB", text: "#F59E0B", badge: "bg-amber-100 text-amber-800" },
+  sad:      { bg: "#EFF6FF", text: "#3B82F6", badge: "bg-blue-100 text-blue-800" },
+  anxious:  { bg: "#FFF1F2", text: "#F43F5E", badge: "bg-rose-100 text-rose-800" },
+  grateful: { bg: "#F0FDF4", text: "#22C55E", badge: "bg-green-100 text-green-800" },
+  angry:    { bg: "#FFF7ED", text: "#EA580C", badge: "bg-orange-100 text-orange-800" },
+  peaceful: { bg: "#F0FDFA", text: "#0D9488", badge: "bg-teal-100 text-teal-800" },
+  proud:    { bg: "#FAF5FF", text: "#9333EA", badge: "bg-purple-100 text-purple-800" },
+  relieved: { bg: "#F0FDF4", text: "#16A34A", badge: "bg-emerald-100 text-emerald-800" },
+  default:  { bg: "#FAFAF9", text: "#78716C", badge: "bg-stone-100 text-stone-700" },
+};
+
+function getMoodPalette(mood: string) {
+  const lower = mood?.toLowerCase() ?? "";
+  return (
+    Object.entries(MOOD_PALETTES).find(([key]) => lower.includes(key))?.[1] ??
+    MOOD_PALETTES.default
+  );
 }
 
 export default function JournalPage() {
@@ -66,54 +76,48 @@ export default function JournalPage() {
   }, []);
 
   return (
-    <div className="container mx-auto py-10 max-w-4xl">
-      <div className="flex justify-between items-center mb-8">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">My Journal</h1>
-          <p className="text-muted-foreground mt-2">
-            Reflect on your thoughts, emotions, and daily experiences.
-          </p>
+    <div className="container max-w-4xl mx-auto px-4 py-8 md:px-8 md:py-12">
+      {loading ? (
+        <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <div className="w-8 h-8 rounded-full border-2 border-primary/20 border-t-primary/60 animate-spin" />
+          <p className="text-sm text-muted-foreground font-sans">Loading your entries…</p>
         </div>
-        <Link href="/journal/new">
-          <Button>Write New Entry</Button>
-        </Link>
-      </div>
-
-      <div className="border rounded-md">
-        <Table>
-          <TableCaption>{loading ? "Loading entries..." : entries.length === 0 ? "You have no journal entries yet." : "A list of your recent thoughts."}</TableCaption>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[120px]">Date</TableHead>
-              <TableHead className="w-[200px]">Title</TableHead>
-              <TableHead className="w-[120px]">Mood</TableHead>
-              <TableHead>Preview</TableHead>
-              <TableHead className="text-right">Action</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {entries.map((entry) => (
-              <TableRow key={entry.id}>
-                <TableCell className="font-medium">
-                  {new Date(entry.createdAt).toLocaleDateString()}
-                </TableCell>
-                <TableCell>{entry.title}</TableCell>
-                <TableCell>{entry.mood}</TableCell>
-                <TableCell className="truncate max-w-[200px] text-muted-foreground block border-none pt-[14px]">
-                  {entry.content}
-                </TableCell>
-                <TableCell className="text-right">
-                  <Link href={`/journal/${entry.id}`}>
-                    <Button variant="ghost" size="sm">
-                      View
-                    </Button>
-                  </Link>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
+      ) : entries.length === 0 ? (
+        <div className="text-center py-32 border border-dashed rounded-2xl bg-muted/30">
+          <p className="text-2xl mb-4 text-muted-foreground font-serif">No entries yet</p>
+          <Link href="/journal/new">
+            <button className="px-5 py-2.5 text-sm border rounded-lg hover:bg-muted transition-colors font-sans">
+              Start writing seamlessly
+            </button>
+          </Link>
+        </div>
+      ) : (
+        <div className="grid gap-6">
+          {entries.map((entry) => {
+            const p = getMoodPalette(entry.mood);
+            return (
+              <Link key={entry.id} href={`/journal/${entry.id}`} className="group block">
+                <div className="bg-card text-card-foreground border rounded-xl p-6 md:p-8 transition-all duration-300 hover:border-primary/50 hover:shadow-sm hover:-translate-y-0.5">
+                  <div className="flex items-center justify-between mb-4">
+                    <span className="text-xs text-muted-foreground uppercase tracking-widest font-sans">
+                      {new Date(entry.createdAt).toLocaleDateString("en-US", { weekday: 'long', month: 'long', day: 'numeric' })}
+                    </span>
+                    {entry.mood && (
+                      <span className={`text-xs px-3 py-1 rounded-full font-medium ${p.badge} font-sans`}>
+                        {entry.mood}
+                      </span>
+                    )}
+                  </div>
+                  <h2 className="text-2xl font-serif mb-3 leading-tight group-hover:text-primary/70 transition-colors">{entry.title}</h2>
+                  <p className="text-muted-foreground text-base font-serif leading-relaxed line-clamp-3">
+                    {entry.content}
+                  </p>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
