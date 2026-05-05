@@ -6,7 +6,9 @@
     "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "backend": "powershell -NoProfile -ExecutionPolicy Bypass -File ./backend/start-backend.ps1",
+    "backend:deps": "powershell -NoProfile -ExecutionPolicy Bypass -File ./backend/start-backend.ps1 -InstallDependencies"
   },
   "dependencies": {
     "class-variance-authority": "^0.7.1",

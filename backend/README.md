@@ -11,15 +11,16 @@ Quickstart (Windows PowerShell):
 
 ```powershell
 # from the repository root
-cd \reflect-ai\backend
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install --upgrade pip
-pip install -r requirements.txt
-# set the env var directly
-$env:HUGGINGFACE_API_KEY="PASTE_YOUR_KEY"
-uvicorn app:app --reload --host 127.0.0.1 --port 8000
+.\backend\start-backend.ps1
 ```
+
+If you prefer using npm from the repository root:
+
+```powershell
+npm run backend
+```
+
+The launcher uses `backend\.venv\Scripts\python.exe` when it exists, creates the virtual environment if needed, installs backend dependencies once on first run, and then starts Uvicorn on `http://127.0.0.1:8000`.
 
 Design notes / decisions:
 - Chunking currently uses a simple word-based strategy (MVP). For better accuracy with models like T5/BART, switch to a tokenizer-based chunking using the model's tokenizer.
