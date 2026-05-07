@@ -16,19 +16,36 @@ export default function LoginPage() {
   const router = useRouter();
 
   const handleAuthSuccess = async (user: any) => {
-    const token = await user.getIdToken();
-    await setAuthCookie(token);
-    router.push("/journal");
+    console.log("[auth] handleAuthSuccess called for:", user.email);
+    try {
+      console.log("[auth] getting ID token...");
+      const token = await user.getIdToken();
+      console.log("[auth] token obtained, length:", token.length);
+      
+      console.log("[auth] calling setAuthCookie...");
+      await setAuthCookie(token);
+      console.log("[auth] cookie set successfully");
+      
+      console.log("[auth] redirecting to /journal...");
+      router.push("/journal");
+      console.log("[auth] router.push called");
+    } catch (err) {
+      console.error("[auth] handleAuthSuccess failed:", err);
+    }
   };
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log("[login] attempting email login for:", email);
     setIsLoading(true);
     setError("");
     try {
+      console.log("[login] calling signInWithEmailAndPassword...");
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      console.log("[login] sign in successful:", userCredential.user.email);
       await handleAuthSuccess(userCredential.user);
     } catch (err: any) {
+      console.error("[login] email login failed:", err.code, err.message);
       setError(err.message || "Failed to log in");
     } finally {
       setIsLoading(false);
@@ -36,12 +53,16 @@ export default function LoginPage() {
   };
 
   const handleEmailSignup = async () => {
+    console.log("[signup] attempting signup for:", email);
     setIsLoading(true);
     setError("");
     try {
+      console.log("[signup] calling createUserWithEmailAndPassword...");
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      console.log("[signup] signup successful:", userCredential.user.email);
       await handleAuthSuccess(userCredential.user);
     } catch (err: any) {
+      console.error("[signup] failed:", err.code, err.message);
       setError(err.message || "Failed to sign up");
     } finally {
       setIsLoading(false);
@@ -49,12 +70,16 @@ export default function LoginPage() {
   };
 
   const handleGoogleLogin = async () => {
+    console.log("[google] attempting Google login...");
     setIsLoading(true);
     setError("");
     try {
+      console.log("[google] calling signInWithPopup...");
       const userCredential = await signInWithPopup(auth, googleProvider);
+      console.log("[google] popup success:", userCredential.user.email);
       await handleAuthSuccess(userCredential.user);
     } catch (err: any) {
+      console.error("[google] failed:", err.code, err.message);
       setError(err.message || "Failed to log in with Google");
     } finally {
       setIsLoading(false);
