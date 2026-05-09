@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-export function middleware(request: NextRequest) { // ← was "proxy"
+export function proxy(request: NextRequest) { // ← was "proxy"
   const token = request.cookies.get("auth-token")?.value;
 
   if (request.nextUrl.pathname.startsWith("/journal")) {
