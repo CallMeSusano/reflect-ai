@@ -25,6 +25,13 @@ interface JournalEntry {
 
 type SortOption = "newest" | "oldest" | "mood" | "title";
 
+type BulkAnalysis = {
+  totalEntries: number;
+  overallSummary: string;
+  emotionTrends: Array<{ label: string; score: number }>;
+  topMoods: Array<{ mood: string; count: number }>;
+};
+
 const MOOD_PALETTES: Record<string, { bg: string; text: string; badge: string }> = {
   happy:    { bg: "#FFFBEB", text: "#F59E0B", badge: "bg-amber-100 text-amber-800" },
   sad:      { bg: "#EFF6FF", text: "#3B82F6", badge: "bg-blue-100 text-blue-800" },
@@ -116,6 +123,10 @@ export default function JournalPage() {
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [sort, setSort] = useState<SortOption>("newest");
+  const [bulkAnalysisLoading, setBulkAnalysisLoading] = useState(false);
+  const [bulkAnalysisError, setBulkAnalysisError] = useState("");
+  const [bulkAnalysisResult, setBulkAnalysisResult] = useState<BulkAnalysis | null>(null);
+  const [showBulkAnalysis, setShowBulkAnalysis] = useState(false);
 
   // FIX 1 — mountedRef: prevents any async callback that outlives the
   // component from calling setState, which would keep the closure (and
@@ -213,6 +224,69 @@ export default function JournalPage() {
   const stats = useMemo(() => computeStats(entries), [entries]);
   const sorted = useMemo(() => sortEntries(entries, sort), [entries, sort]);
 
+  const handleBulkAnalyze = async () => {
+    if (entries.length === 0) {
+      setBulkAnalysisError("No entries to analyze");
+      return;
+    }
+
+    setBulkAnalysisLoading(true);
+    setBulkAnalysisError("");
+
+    try {
+      const combinedText = entries
+        .map((entry) => `Title: ${entry.title}\n\n${entry.content}`)
+        .join("\n\n---\n\n");
+
+      const response = await fetch("/api/analyze-content", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text: combinedText }),
+      });
+
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        setBulkAnalysisError(
+          typeof payload?.detail === "string"
+            ? payload.detail
+            : "Analysis request failed."
+        );
+        return;
+      }
+
+      const moodCounts: Record<string, number> = {};
+      entries.forEach((entry) => {
+        if (entry.mood) {
+          moodCounts[entry.mood] = (moodCounts[entry.mood] || 0) + 1;
+        }
+      });
+
+      const topMoods = Object.entries(moodCounts)
+        .map(([mood, count]) => ({ mood, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 5);
+
+      const result: BulkAnalysis = {
+        totalEntries: entries.length,
+        overallSummary: payload.summary,
+        emotionTrends: payload.emotions || [],
+        topMoods,
+      };
+
+      setBulkAnalysisResult(result);
+      setShowBulkAnalysis(true);
+    } catch (err) {
+      setBulkAnalysisError(
+        err instanceof Error ? err.message : "Unexpected network error."
+      );
+    } finally {
+      setBulkAnalysisLoading(false);
+    }
+  };
+
   return (
     <div className="container max-w-4xl mx-auto px-4 py-8 md:px-8 md:py-12">
       {loading ? (
@@ -304,17 +378,99 @@ export default function JournalPage() {
               <p className="text-sm text-muted-foreground font-sans">
                 {entries.length} {entries.length === 1 ? "entry" : "entries"}
               </p>
-              <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
-                <SelectTrigger className="w-40 h-8 text-xs font-sans rounded-lg border bg-background">
-                  <SelectValue placeholder="Sort by…" />
-                </SelectTrigger>
-                <SelectContent align="end" className="text-xs font-sans">
-                  <SelectItem value="newest">Newest first</SelectItem>
-                  <SelectItem value="oldest">Oldest first</SelectItem>
-                  <SelectItem value="mood">By mood</SelectItem>
-                  <SelectItem value="title">By title A–Z</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={handleBulkAnalyze}
+                  disabled={bulkAnalysisLoading}
+                  className="text-sm px-4 py-1.5 rounded-lg font-medium transition-opacity hover:opacity-80 bg-primary/10 text-primary font-sans disabled:opacity-50"
+                >
+                  {bulkAnalysisLoading ? "Analyzing all…" : "Analyze All Entries"}
+                </button>
+                <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
+                  <SelectTrigger className="w-40 h-8 text-xs font-sans rounded-lg border bg-background">
+                    <SelectValue placeholder="Sort by…" />
+                  </SelectTrigger>
+                  <SelectContent align="end" className="text-xs font-sans">
+                    <SelectItem value="newest">Newest first</SelectItem>
+                    <SelectItem value="oldest">Oldest first</SelectItem>
+                    <SelectItem value="mood">By mood</SelectItem>
+                    <SelectItem value="title">By title A–Z</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+
+          {bulkAnalysisError && (
+            <div className="mb-6 p-4 rounded-lg bg-destructive/10 text-destructive text-sm font-sans">
+              <p>Bulk analysis failed: {bulkAnalysisError}</p>
+            </div>
+          )}
+
+          {showBulkAnalysis && bulkAnalysisResult && (
+            <div className="mb-8 p-6 border border-border/40 rounded-lg bg-card">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-lg font-serif">Overall Analysis</h3>
+                <button
+                  onClick={() => setShowBulkAnalysis(false)}
+                  className="text-xs opacity-50 hover:opacity-80 font-sans"
+                >
+                  Hide
+                </button>
+              </div>
+
+              <div className="mb-6">
+                <h4 className="text-sm font-medium font-sans text-muted-foreground mb-2">
+                  Summary ({bulkAnalysisResult.totalEntries} entries)
+                </h4>
+                <p className="text-base leading-relaxed font-serif text-foreground/80">
+                  {bulkAnalysisResult.overallSummary}
+                </p>
+              </div>
+
+              {bulkAnalysisResult.emotionTrends && bulkAnalysisResult.emotionTrends.length > 0 && (
+                <div className="mb-6">
+                  <h4 className="text-sm font-medium font-sans text-muted-foreground mb-3">
+                    Emotion Trends
+                  </h4>
+                  <div className="grid gap-2">
+                    {bulkAnalysisResult.emotionTrends.map((emotion) => (
+                      <div key={emotion.label} className="flex items-center justify-between">
+                        <span className="text-sm font-sans font-medium capitalize">{emotion.label}</span>
+                        <div className="flex items-center gap-2">
+                          <div className="w-32 h-1.5 bg-muted rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-primary transition-all"
+                              style={{ width: `${Math.min(emotion.score * 100, 100)}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-muted-foreground font-sans w-10 text-right">
+                            {(emotion.score * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {bulkAnalysisResult.topMoods && bulkAnalysisResult.topMoods.length > 0 && (
+                <div>
+                  <h4 className="text-sm font-medium font-sans text-muted-foreground mb-3">
+                    Top Moods
+                  </h4>
+                  <div className="flex flex-wrap gap-2">
+                    {bulkAnalysisResult.topMoods.map((item) => (
+                      <span
+                        key={item.mood}
+                        className="px-3 py-1 rounded-full text-xs font-medium font-sans bg-primary/10 text-primary"
+                      >
+                        {item.mood} ({item.count})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
