@@ -126,6 +126,7 @@ export default function JournalPage() {
   const [bulkAnalysisLoading, setBulkAnalysisLoading] = useState(false);
   const [bulkAnalysisError, setBulkAnalysisError] = useState("");
   const [bulkAnalysisResult, setBulkAnalysisResult] = useState<BulkAnalysis | null>(null);
+  const [bulkAnalysisMetadata, setBulkAnalysisMetadata] = useState<Record<string, unknown> | null>(null);
   const [showBulkAnalysis, setShowBulkAnalysis] = useState(false);
 
   // FIX 1 — mountedRef: prevents any async callback that outlives the
@@ -246,16 +247,19 @@ export default function JournalPage() {
         body: JSON.stringify({ text: combinedText }),
       });
 
-      const payload = await response.json().catch(() => null);
+       const payload = await response.json().catch(() => null);
 
-      if (!response.ok) {
-        setBulkAnalysisError(
-          typeof payload?.detail === "string"
-            ? payload.detail
-            : "Analysis request failed."
-        );
-        return;
-      }
+       if (!response.ok) {
+         setBulkAnalysisError(
+           typeof payload?.detail === "string"
+             ? payload.detail
+             : "Analysis request failed."
+         );
+         // Capture upstream metadata even on error so we can show diagnostic details
+         setBulkAnalysisMetadata(payload?.upstream ?? null);
+         setShowBulkAnalysis(true);
+         return;
+       }
 
       const moodCounts: Record<string, number> = {};
       entries.forEach((entry) => {
@@ -277,6 +281,7 @@ export default function JournalPage() {
       };
 
       setBulkAnalysisResult(result);
+      setBulkAnalysisMetadata(payload?.metadata ?? null);
       setShowBulkAnalysis(true);
     } catch (err) {
       setBulkAnalysisError(
@@ -401,11 +406,28 @@ export default function JournalPage() {
             </div>
           )}
 
-          {bulkAnalysisError && (
-            <div className="mb-6 p-4 rounded-lg bg-destructive/10 text-destructive text-sm font-sans">
-              <p>Bulk analysis failed: {bulkAnalysisError}</p>
-            </div>
-          )}
+           {bulkAnalysisError && (
+             <div className="mb-6 p-4 rounded-lg bg-destructive/10 text-destructive text-sm font-sans">
+               <p>Bulk analysis failed: {bulkAnalysisError}</p>
+               {/* Show upstream metadata errors if present */}
+               {Boolean(bulkAnalysisMetadata?.summary_errors) && (
+                 <div className="mt-3 p-3 rounded-md bg-destructive/20 text-destructive/90">
+                   <p className="font-medium text-xs mb-2">Summary errors from service:</p>
+                   <pre className="whitespace-pre-wrap text-xs font-mono overflow-auto max-h-48">
+                     {JSON.stringify(bulkAnalysisMetadata?.summary_errors, null, 2)}
+                   </pre>
+                 </div>
+               )}
+               {Boolean(bulkAnalysisMetadata?.emotion_errors) && (
+                 <div className="mt-3 p-3 rounded-md bg-destructive/20 text-destructive/90">
+                   <p className="font-medium text-xs mb-2">Emotion errors from service:</p>
+                   <pre className="whitespace-pre-wrap text-xs font-mono overflow-auto max-h-48">
+                     {JSON.stringify(bulkAnalysisMetadata?.emotion_errors, null, 2)}
+                   </pre>
+                 </div>
+               )}
+             </div>
+           )}
 
           {showBulkAnalysis && bulkAnalysisResult && (
             <div className="mb-8 p-6 border border-border/40 rounded-lg bg-card">
@@ -469,6 +491,19 @@ export default function JournalPage() {
                       </span>
                     ))}
                   </div>
+                </div>
+              )}
+              {/* Show upstream metadata errors if present */}
+              {Boolean(bulkAnalysisMetadata?.summary_errors) && (
+                <div className="mt-4 p-3 rounded-md bg-destructive/10 text-destructive text-sm font-sans">
+                  <p className="font-medium">Summary errors from analyzer:</p>
+                  <pre className="whitespace-pre-wrap text-xs">{JSON.stringify(bulkAnalysisMetadata?.summary_errors, null, 2)}</pre>
+                </div>
+              )}
+              {Boolean(bulkAnalysisMetadata?.emotion_errors) && (
+                <div className="mt-4 p-3 rounded-md bg-destructive/10 text-destructive text-sm font-sans">
+                  <p className="font-medium">Emotion errors from analyzer:</p>
+                  <pre className="whitespace-pre-wrap text-xs">{JSON.stringify(bulkAnalysisMetadata?.emotion_errors, null, 2)}</pre>
                 </div>
               )}
             </div>

@@ -80,7 +80,7 @@ function DeleteModal({
         <div className="flex flex-col gap-1.5">
           <h2 className="text-base font-semibold font-sans text-foreground">Delete entry?</h2>
           <p className="text-sm text-muted-foreground font-sans leading-relaxed">
-            This entry will be permanently deleted. You can't undo this action.
+            This entry will be permanently deleted. You cannot undo this action.
           </p>
         </div>
         <div className="flex items-center gap-3 justify-end">
@@ -160,6 +160,7 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
     emotions: Array<{ label: string; score: number }>;
     metadata: Record<string, unknown>;
   } | null>(null);
+  const [analysisMetadata, setAnalysisMetadata] = useState<Record<string, unknown> | null>(null);
 
   /* Load entry */
   useEffect(() => {
@@ -221,6 +222,10 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
       });
 
       const payload = await response.json().catch(() => null);
+
+      // Always capture any metadata the analyzer returned (either under
+      // `upstream` for surfaced errors or `metadata` for successful results)
+      setAnalysisMetadata(payload?.upstream ?? payload?.metadata ?? null);
 
       if (!response.ok) {
         setAnalysisError(
@@ -408,11 +413,34 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
           </div>
         )}
 
-        {analysisError && (
-          <div className="mt-8 p-4 rounded-lg bg-destructive/10 text-destructive text-sm font-sans">
-            <p>Analysis failed: {analysisError}</p>
-          </div>
-        )}
+         {analysisError && (
+           <div className="mt-8 p-4 rounded-lg bg-destructive/10 text-destructive text-sm font-sans">
+             <p className="font-medium mb-3">Analysis failed: {analysisError}</p>
+             {/* Show specific error details */}
+             {Boolean(analysisMetadata?.summary_errors) && (
+               <div className="mt-3 p-2 rounded-md bg-destructive/20">
+                 <p className="font-medium text-xs mb-1">Summary errors:</p>
+                 <pre className="whitespace-pre-wrap text-xs font-mono overflow-auto max-h-40">
+                   {JSON.stringify(analysisMetadata?.summary_errors, null, 2)}
+                 </pre>
+               </div>
+             )}
+             {Boolean(analysisMetadata?.emotion_errors) && (
+               <div className="mt-3 p-2 rounded-md bg-destructive/20">
+                 <p className="font-medium text-xs mb-1">Emotion errors:</p>
+                 <pre className="whitespace-pre-wrap text-xs font-mono overflow-auto max-h-40">
+                   {JSON.stringify(analysisMetadata?.emotion_errors, null, 2)}
+                 </pre>
+               </div>
+             )}
+           </div>
+         )}
+         {analysisMetadata && (
+           <div className="mt-4 p-3 rounded-md bg-destructive/10 text-destructive text-sm font-sans">
+             <p className="font-medium">Analyzer metadata (for debugging):</p>
+             <pre className="whitespace-pre-wrap text-xs">{JSON.stringify(analysisMetadata, null, 2)}</pre>
+           </div>
+         )}
       </div>
     </div>
   );

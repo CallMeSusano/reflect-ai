@@ -33,6 +33,17 @@ async def analyze_text(req: AnalyzeRequest):
         raise HTTPException(status_code=400, detail="text is required")
     try:
         result = _analyzer.analyze(req.text, summary_model=req.model_summary, emotion_model=req.model_emotion)
+        # If the analyzer recorded errors from upstream (e.g. HF Inference API
+        # returned non-JSON or error pages), surface this as a 502 so the
+        # frontend can show a helpful message instead of an empty analysis.
+        metadata = result.get("metadata", {}) if isinstance(result, dict) else {}
+        if metadata.get("summary_errors") or metadata.get("emotion_errors"):
+            # include the metadata in the response so callers can debug
+            return JSONResponse(status_code=502, content={
+                "detail": "analysis produced upstream errors",
+                "upstream": metadata,
+            })
+
         return JSONResponse(status_code=200, content=result)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

@@ -115,11 +115,20 @@ class Analyzer:
             # Call the stable HTTP Inference API endpoint
             url = f"https://api-inference.huggingface.co/models/{self.summary_model}"
             headers = {"Authorization": f"Bearer {self.hf_token}"} if self.hf_token else {}
+
+            import os
+            log_level = os.getenv("LOG_LEVEL", "info").lower()
+            if log_level == "debug":
+                print(f"[DEBUG] Calling HF summary API: {url}")
+
             resp = requests.post(url, headers=headers, json={"inputs": text, "parameters": {"max_length": 150}})
             content_type = resp.headers.get("content-type", "")
             if resp.status_code != 200:
                 # raise with body to be captured by caller
-                raise RuntimeError(f"HF summary request failed: {resp.status_code} {resp.text}")
+                error_msg = f"HF summary request failed: {resp.status_code} {resp.text}"
+                if log_level == "debug":
+                    print(f"[DEBUG] {error_msg}")
+                raise RuntimeError(error_msg)
 
             if "application/json" in content_type:
                 out = resp.json()
@@ -156,10 +165,19 @@ class Analyzer:
         if self._use_inference_api:
             url = f"https://api-inference.huggingface.co/models/{self.emotion_model}"
             headers = {"Authorization": f"Bearer {self.hf_token}"} if self.hf_token else {}
+
+            import os
+            log_level = os.getenv("LOG_LEVEL", "info").lower()
+            if log_level == "debug":
+                print(f"[DEBUG] Calling HF emotion API: {url}")
+
             resp = requests.post(url, headers=headers, json={"inputs": text})
             content_type = resp.headers.get("content-type", "")
             if resp.status_code != 200:
-                raise RuntimeError(f"HF emotion request failed: {resp.status_code} {resp.text}")
+                error_msg = f"HF emotion request failed: {resp.status_code} {resp.text}"
+                if log_level == "debug":
+                    print(f"[DEBUG] {error_msg}")
+                raise RuntimeError(error_msg)
 
             if "application/json" in content_type:
                 out = resp.json()
