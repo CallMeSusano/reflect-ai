@@ -369,8 +369,9 @@ export default function EditJournalEntryPage({ params }: { params: Promise<{ id:
 
     if (loading) {
         return (
-            <div className="flex-1 flex items-center justify-center bg-background">
+            <div className="flex flex-col items-center justify-center py-20 gap-3">
                 <div className="w-8 h-8 rounded-full border-2 border-primary/20 border-t-primary/60 animate-spin" />
+                <p className="text-sm text-muted-foreground font-sans">Loading your entry…</p>
             </div>
         );
     }

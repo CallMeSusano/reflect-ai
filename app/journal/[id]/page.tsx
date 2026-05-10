@@ -57,6 +57,60 @@ function WordCount({ text }: { text: string }) {
   );
 }
 
+/* ─── Delete confirmation modal ──────────────────────────────── */
+
+function DeleteModal({
+  onConfirm,
+  onCancel,
+  deleting,
+}: {
+  onConfirm: () => void;
+  onCancel: () => void;
+  deleting: boolean;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/40 backdrop-blur-sm"
+        onClick={!deleting ? onCancel : undefined}
+      />
+      {/* Dialog */}
+      <div className="relative z-10 bg-background border border-border rounded-2xl shadow-xl px-8 py-7 max-w-sm w-full mx-4 flex flex-col gap-5">
+        <div className="flex flex-col gap-1.5">
+          <h2 className="text-base font-semibold font-sans text-foreground">Delete entry?</h2>
+          <p className="text-sm text-muted-foreground font-sans leading-relaxed">
+            This entry will be permanently deleted. You can't undo this action.
+          </p>
+        </div>
+        <div className="flex items-center gap-3 justify-end">
+          <button
+            onClick={onCancel}
+            disabled={deleting}
+            className="text-sm px-4 py-2 rounded-lg font-medium font-sans bg-muted/50 text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={deleting}
+            className="text-sm px-4 py-2 rounded-lg font-medium font-sans bg-destructive text-white hover:opacity-90 transition-opacity disabled:opacity-50 flex items-center gap-2"
+          >
+            {deleting ? (
+              <>
+                <span className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                Deleting…
+              </>
+            ) : (
+              "Delete"
+            )}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ─── View media (read mode) ─────────────────────────────────── */
 
 function ViewMediaGrid({ media, apiUrl }: { media: SavedMediaFile[]; apiUrl: string }) {
@@ -96,6 +150,8 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
   const [entry, setEntry] = useState<JournalEntry | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   /* Load entry */
   useEffect(() => {
@@ -131,7 +187,7 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
   }, [entryId]);
 
   const handleDelete = async () => {
-    if (!confirm("Are you sure you want to delete this entry?")) return;
+    setDeleting(true);
     try {
       const docRef = doc(db, "users", auth.currentUser!.uid, "journals", entryId);
       await deleteDoc(docRef);
@@ -139,6 +195,8 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
     } catch (err) {
       console.error(err);
       setError("Failed to delete journal entry.");
+      setDeleting(false);
+      setShowDeleteModal(false);
     }
   };
 
@@ -146,9 +204,10 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
 
   if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center bg-background">
-        <div className="w-8 h-8 rounded-full border-2 border-primary/20 border-t-primary/60 animate-spin" />
-      </div>
+      <div className="flex flex-col items-center justify-center py-20 gap-3">
+          <div className="w-8 h-8 rounded-full border-2 border-primary/20 border-t-primary/60 animate-spin" />
+          <p className="text-sm text-muted-foreground font-sans">Loading your entry…</p>
+        </div>
     );
   }
 
@@ -180,6 +239,14 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
 
   return (
     <div className="flex-1 transition-colors duration-500 bg-background text-foreground font-serif">
+      {showDeleteModal && (
+        <DeleteModal
+          onConfirm={handleDelete}
+          onCancel={() => setShowDeleteModal(false)}
+          deleting={deleting}
+        />
+      )}
+
       <div className="sticky top-14 z-10 backdrop-blur-sm border-b border-border/40 px-6 py-3 flex items-center justify-between bg-background/95">
         <Link
           href="/journal"
@@ -198,7 +265,7 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
             Edit
           </Link>
           <button
-            onClick={handleDelete}
+            onClick={() => setShowDeleteModal(true)}
             className="text-sm px-4 py-1.5 rounded-lg font-medium transition-opacity hover:bg-destructive/10 text-destructive/70 hover:text-destructive font-sans"
           >
             Delete
