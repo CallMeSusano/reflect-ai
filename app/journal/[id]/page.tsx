@@ -1,21 +1,40 @@
 "use client";
 
-import { useEffect, useState, use, useRef } from "react";
+import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { doc, getDoc, updateDoc, deleteDoc } from "firebase/firestore";
+import { doc, getDoc, deleteDoc } from "firebase/firestore";
 import { auth, db } from "@/firebase";
 
-const MOOD_PALETTES: Record<string, { accentText: string; accentBorder: string }> = {
-  happy:    { accentText: "text-amber-500", accentBorder: "border-amber-500/30" },
-  sad:      { accentText: "text-blue-500", accentBorder: "border-blue-500/30" },
-  anxious:  { accentText: "text-rose-500", accentBorder: "border-rose-500/30" },
-  grateful: { accentText: "text-green-500", accentBorder: "border-green-500/30" },
-  angry:    { accentText: "text-orange-500", accentBorder: "border-orange-500/30" },
-  peaceful: { accentText: "text-teal-500", accentBorder: "border-teal-500/30" },
-  proud:    { accentText: "text-purple-500", accentBorder: "border-purple-500/30" },
-  relieved: { accentText: "text-emerald-500", accentBorder: "border-emerald-500/30" },
-  default:  { accentText: "text-muted-foreground", accentBorder: "border-border" },
+/* ─── Types ─────────────────────────────────────────────────── */
+
+interface SavedMediaFile {
+  type: "photos" | "videos";
+  filename: string;
+}
+
+interface JournalEntry {
+  id: string;
+  title: string;
+  mood: string;
+  content: string;
+  media: SavedMediaFile[];
+  userId: string;
+  createdAt: number;
+}
+
+/* ─── Mood palettes ──────────────────────────────────────────── */
+
+const MOOD_PALETTES: Record<string, { accentText: string; accentBorder: string; pill: string }> = {
+  happy:    { accentText: "text-amber-500",   accentBorder: "border-amber-400/40",   pill: "bg-amber-50 dark:bg-amber-950/30" },
+  sad:      { accentText: "text-blue-500",    accentBorder: "border-blue-400/40",    pill: "bg-blue-50 dark:bg-blue-950/30" },
+  anxious:  { accentText: "text-rose-500",    accentBorder: "border-rose-400/40",    pill: "bg-rose-50 dark:bg-rose-950/30" },
+  grateful: { accentText: "text-green-500",   accentBorder: "border-green-400/40",   pill: "bg-green-50 dark:bg-green-950/30" },
+  angry:    { accentText: "text-orange-500",  accentBorder: "border-orange-400/40",  pill: "bg-orange-50 dark:bg-orange-950/30" },
+  peaceful: { accentText: "text-teal-500",    accentBorder: "border-teal-400/40",    pill: "bg-teal-50 dark:bg-teal-950/30" },
+  proud:    { accentText: "text-purple-500",  accentBorder: "border-purple-400/40",  pill: "bg-purple-50 dark:bg-purple-950/30" },
+  relieved: { accentText: "text-emerald-500", accentBorder: "border-emerald-400/40", pill: "bg-emerald-50 dark:bg-emerald-950/30" },
+  default:  { accentText: "text-muted-foreground", accentBorder: "border-border",    pill: "bg-muted/30" },
 };
 
 function getMoodPalette(mood: string) {
@@ -26,67 +45,80 @@ function getMoodPalette(mood: string) {
   );
 }
 
+/* ─── Word count ─────────────────────────────────────────────── */
+
 function WordCount({ text }: { text: string }) {
   const words = text.trim() ? text.trim().split(/\s+/).length : 0;
   const minutes = Math.ceil(words / 200);
   return (
-    <span className="text-xs text-muted-foreground font-sans">
+    <span className="text-xs text-muted-foreground font-sans tabular-nums">
       {words} words · {minutes} min read
     </span>
   );
 }
 
-interface JournalEntry {
-  id: string;
-  title: string;
-  mood: string;
-  content: string;
-  userId: string;
-  createdAt: number;
+/* ─── View media (read mode) ─────────────────────────────────── */
+
+function ViewMediaGrid({ media, apiUrl }: { media: SavedMediaFile[]; apiUrl: string }) {
+  if (media.length === 0) return null;
+
+  return (
+    <div className="flex flex-col gap-6 mt-12 pt-8 border-t border-border/40">
+      {media.map((file, idx) => (
+        <div key={idx} className="rounded-xl overflow-hidden border border-border w-full bg-muted/10">
+          {file.type === "photos" ? (
+            <img
+              src={`${apiUrl}/download/photos/${file.filename}`}
+              alt="attachment"
+              className="w-full h-auto max-h-[70vh] object-contain"
+            />
+          ) : (
+            <video
+              src={`${apiUrl}/download/videos/${file.filename}`}
+              controls
+              className="w-full h-auto max-h-[70vh] object-contain bg-black"
+            />
+          )}
+        </div>
+      ))}
+    </div>
+  );
 }
+
+/* ─── Page ───────────────────────────────────────────────────── */
 
 export default function JournalEntryPage({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const resolvedParams = use(params);
   const entryId = resolvedParams.id;
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5002";
 
   const [entry, setEntry] = useState<JournalEntry | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  const [isEditing, setIsEditing] = useState(false);
-  const [editTitle, setEditTitle] = useState("");
-  const [editMood, setEditMood] = useState("");
-  const [editContent, setEditContent] = useState("");
-  const [saving, setSaving] = useState(false);
-
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-
+  /* Load entry */
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       if (user) {
         try {
           const docRef = doc(db, "users", user.uid, "journals", entryId);
           const docSnap = await getDoc(docRef);
-          
           if (docSnap.exists()) {
             const data = docSnap.data();
-            const createdAtNum = typeof data.createdAt === "number" ? data.createdAt : Date.now();
-            const loadedEntry = {
+            const loaded: JournalEntry = {
               id: docSnap.id,
               title: data.title || "",
               mood: data.mood || "",
               content: data.content || "",
+              media: data.media || [],
               userId: data.userId || "",
-              createdAt: createdAtNum
+              createdAt: typeof data.createdAt === "number" ? data.createdAt : Date.now(),
             };
-            setEntry(loadedEntry);
-            setEditTitle(loadedEntry.title);
-            setEditMood(loadedEntry.mood);
-            setEditContent(loadedEntry.content);
+            setEntry(loaded);
           }
         } catch (err) {
-          console.error("Error fetching document:", err);
+          console.error(err);
           setError("Failed to load journal entry");
         } finally {
           setLoading(false);
@@ -95,63 +127,27 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
         setLoading(false);
       }
     });
-
     return () => unsubscribe();
   }, [entryId]);
 
-  // Adjust textarea height in edit mode
-  useEffect(() => {
-    if (isEditing && textareaRef.current) {
-      textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = textareaRef.current.scrollHeight + "px";
-    }
-  }, [isEditing, editContent]);
-
-  const handleUpdate = async () => {
-    if (!editTitle.trim() || !editContent.trim()) {
-      setError("Title and content cannot be empty.");
-      return;
-    }
-
-    setSaving(true);
-    try {
-      const docRef = doc(db, "users", auth.currentUser!.uid, "journals", entryId);
-      await updateDoc(docRef, {
-        title: editTitle,
-        mood: editMood,
-        content: editContent,
-        updatedAt: Date.now()
-      });
-      setEntry((prev) => prev ? { ...prev, title: editTitle, mood: editMood, content: editContent } : null);
-      setIsEditing(false);
-      setError("");
-    } catch (err) {
-      console.error("Error updating document:", err);
-      setError("Failed to update journal entry.");
-    } finally {
-      setSaving(false);
-    }
-  };
-
   const handleDelete = async () => {
     if (!confirm("Are you sure you want to delete this entry?")) return;
-    
     try {
       const docRef = doc(db, "users", auth.currentUser!.uid, "journals", entryId);
       await deleteDoc(docRef);
       router.push("/journal");
     } catch (err) {
-      console.error("Error deleting document:", err);
+      console.error(err);
       setError("Failed to delete journal entry.");
     }
   };
 
+  /* ─── Render guards ─────────────────────────────────────────── */
+
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center bg-background">
-        <div className="flex flex-col items-center justify-center gap-3">
-          <div className="w-8 h-8 rounded-full border-2 border-primary/20 border-t-primary/60 animate-spin" />
-        </div>
+        <div className="w-8 h-8 rounded-full border-2 border-primary/20 border-t-primary/60 animate-spin" />
       </div>
     );
   }
@@ -169,18 +165,21 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
     );
   }
 
-  const palette = getMoodPalette(isEditing ? editMood : entry.mood);
+  /* ─── Derived state ─────────────────────────────────────────── */
+
+  const palette = getMoodPalette(entry.mood);
+
   const formattedDate = new Date(entry.createdAt).toLocaleDateString("en-US", {
-    weekday: 'long',
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric'
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
   });
+
+  /* ─── JSX ───────────────────────────────────────────────────── */
 
   return (
     <div className="flex-1 transition-colors duration-500 bg-background text-foreground font-serif">
-      
-      {/* Top Navigation */}
       <div className="sticky top-14 z-10 backdrop-blur-sm border-b border-border/40 px-6 py-3 flex items-center justify-between bg-background/95">
         <Link
           href="/journal"
@@ -188,105 +187,50 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
         >
           ← Back
         </Link>
-        
-        <WordCount text={isEditing ? editContent : entry.content} />
-        
+
+        <WordCount text={entry.content} />
+
         <div className="flex items-center gap-2">
-          {!isEditing ? (
-            <>
-              <button
-                onClick={() => setIsEditing(true)}
-                className="text-sm px-4 py-1.5 rounded-lg font-medium transition-opacity hover:opacity-80 bg-muted/50 text-foreground font-sans"
-              >
-                Edit
-              </button>
-              <button
-                onClick={handleDelete}
-                className="text-sm px-4 py-1.5 rounded-lg font-medium transition-opacity hover:bg-destructive/10 text-destructive/70 hover:text-destructive font-sans"
-              >
-                Delete
-              </button>
-            </>
-          ) : (
-            <>
-              <button
-                onClick={() => {
-                  setIsEditing(false);
-                  setEditTitle(entry.title);
-                  setEditMood(entry.mood);
-                  setEditContent(entry.content);
-                }}
-                disabled={saving}
-                className="text-sm px-4 py-1.5 rounded-lg opacity-50 hover:opacity-80 transition-opacity font-sans"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleUpdate}
-                disabled={saving}
-                className="text-sm px-4 py-1.5 rounded-lg bg-primary text-primary-foreground font-medium transition-opacity hover:opacity-90 disabled:opacity-50 font-sans"
-              >
-                {saving ? "Saving…" : "Save"}
-              </button>
-            </>
-          )}
+          <Link
+            href={`/journal/${entryId}/edit`}
+            className="text-sm px-4 py-1.5 rounded-lg font-medium transition-opacity hover:opacity-80 bg-muted/50 text-foreground font-sans"
+          >
+            Edit
+          </Link>
+          <button
+            onClick={handleDelete}
+            className="text-sm px-4 py-1.5 rounded-lg font-medium transition-opacity hover:bg-destructive/10 text-destructive/70 hover:text-destructive font-sans"
+          >
+            Delete
+          </button>
         </div>
       </div>
 
       <div className="max-w-2xl mx-auto px-6 py-12 flex flex-col min-h-[85vh]">
         {error && (
-          <p className="text-sm text-destructive mb-6 font-sans">{error}</p>
+          <p className="text-sm text-destructive mb-6 font-sans bg-destructive/5 border border-destructive/20 rounded-lg px-4 py-3">
+            {error}
+          </p>
         )}
 
-        {isEditing ? (
-          <>
-            <div className="mb-8">
-              <input
-                type="text"
-                value={editMood}
-                onChange={(e) => setEditMood(e.target.value)}
-                placeholder="How are you feeling?"
-                className={`text-sm px-3 py-1.5 rounded-full border bg-muted/20 outline-none focus:ring-2 transition-all w-2/3 md:w-auto font-sans focus:ring-primary/20 ${palette.accentText} ${palette.accentBorder}`}
-              />
-            </div>
+        <div className="mb-8">
+          <p className="text-sm opacity-50 mb-4 font-sans">
+            {formattedDate}
+            {entry.mood && (
+              <>
+                {" · "}
+                <span className={palette.accentText}>{entry.mood}</span>
+              </>
+            )}
+          </p>
+          <h1 className="text-4xl font-light tracking-tight font-serif">{entry.title}</h1>
+        </div>
 
-            <input
-              type="text"
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              placeholder="Give this entry a title…"
-              className="w-full bg-transparent outline-none text-4xl mb-8 font-light tracking-tight placeholder-muted-foreground/30 font-serif"
-            />
+        <div className="text-lg leading-[1.9] whitespace-pre-wrap flex-grow text-foreground/90 font-serif">
+          {entry.content}
+        </div>
 
-            <textarea
-              ref={textareaRef}
-              value={editContent}
-              onChange={(e) => setEditContent(e.target.value)}
-              placeholder="What's on your mind today?"
-              className="w-full bg-transparent outline-none resize-none text-lg leading-[1.9] overflow-hidden flex-grow placeholder-muted-foreground/30 font-serif"
-              style={{ minHeight: "400px" }}
-            />
-          </>
-        ) : (
-          <>
-            <div className="mb-8">
-              <p className="text-sm opacity-50 mb-4 font-sans">
-                {formattedDate} {entry.mood && `· ${entry.mood}`}
-              </p>
-              <h1 
-                className="text-4xl font-light tracking-tight font-serif"
-              >
-                {entry.title}
-              </h1>
-            </div>
-
-            <div 
-              className="text-lg leading-[1.9] whitespace-pre-wrap flex-grow text-foreground/90 font-serif"
-            >
-              {entry.content}
-            </div>
-          </>
-        )}
+        <ViewMediaGrid media={entry.media} apiUrl={apiUrl} />
       </div>
     </div>
   );
