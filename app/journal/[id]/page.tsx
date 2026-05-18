@@ -80,7 +80,7 @@ function DeleteModal({
         <div className="flex flex-col gap-1.5">
           <h2 className="text-base font-semibold font-sans text-foreground">Delete entry?</h2>
           <p className="text-sm text-muted-foreground font-sans leading-relaxed">
-            This entry will be permanently deleted. You can't undo this action.
+            This entry will be permanently deleted. You cannot undo this action.
           </p>
         </div>
         <div className="flex items-center gap-3 justify-end">
@@ -152,6 +152,15 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
   const [error, setError] = useState("");
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showAnalysis, setShowAnalysis] = useState(false);
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState("");
+  const [analysisResult, setAnalysisResult] = useState<{
+    summary: string;
+    emotions: Array<{ label: string; score: number }>;
+    metadata: Record<string, unknown>;
+  } | null>(null);
+  const [analysisMetadata, setAnalysisMetadata] = useState<Record<string, unknown> | null>(null);
 
   /* Load entry */
   useEffect(() => {
@@ -197,6 +206,44 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
       setError("Failed to delete journal entry.");
       setDeleting(false);
       setShowDeleteModal(false);
+    }
+  };
+
+  const handleAnalyze = async () => {
+    setAnalysisLoading(true);
+    setAnalysisError("");
+    try {
+      const response = await fetch("/api/analyze-content", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ text: entry?.content || "" }),
+      });
+
+      const payload = await response.json().catch(() => null);
+
+      // Always capture any metadata the analyzer returned (either under
+      // `upstream` for surfaced errors or `metadata` for successful results)
+      setAnalysisMetadata(payload?.upstream ?? payload?.metadata ?? null);
+
+      if (!response.ok) {
+        setAnalysisError(
+          typeof payload?.detail === "string"
+            ? payload.detail
+            : "Analysis request failed."
+        );
+        return;
+      }
+
+      setAnalysisResult(payload);
+      setShowAnalysis(true);
+    } catch (err) {
+      setAnalysisError(
+        err instanceof Error ? err.message : "Unexpected network error."
+      );
+    } finally {
+      setAnalysisLoading(false);
     }
   };
 
@@ -258,6 +305,13 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
         <WordCount text={entry.content} />
 
         <div className="flex items-center gap-2">
+          <button
+            onClick={handleAnalyze}
+            disabled={analysisLoading}
+            className="text-sm px-4 py-1.5 rounded-lg font-medium transition-opacity hover:opacity-80 bg-primary/10 text-primary font-sans disabled:opacity-50"
+          >
+            {analysisLoading ? "Analyzing…" : "Analyze"}
+          </button>
           <Link
             href={`/journal/${entryId}/edit`}
             className="text-sm px-4 py-1.5 rounded-lg font-medium transition-opacity hover:opacity-80 bg-muted/50 text-foreground font-sans"
@@ -298,6 +352,95 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
         </div>
 
         <ViewMediaGrid media={entry.media} apiUrl={apiUrl} />
+
+        {/* Analysis Section */}
+        {showAnalysis && analysisResult && (
+          <div className="mt-12 pt-8 border-t border-border/40">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-serif">Analysis</h2>
+              <button
+                onClick={() => setShowAnalysis(false)}
+                className="text-xs opacity-50 hover:opacity-80 font-sans"
+              >
+                Hide
+              </button>
+            </div>
+
+            {/* Summary */}
+            {analysisResult.summary && (
+              <div className="mb-8">
+                <h3 className="text-sm font-medium font-sans text-muted-foreground mb-3">Summary</h3>
+                <p className="text-base leading-relaxed font-serif text-foreground/80">
+                  {analysisResult.summary}
+                </p>
+              </div>
+            )}
+
+            {/* Emotions */}
+            {analysisResult.emotions && analysisResult.emotions.length > 0 && (
+              <div className="mb-8">
+                <h3 className="text-sm font-medium font-sans text-muted-foreground mb-3">Detected Emotions</h3>
+                <div className="grid gap-3">
+                  {analysisResult.emotions.map((emotion) => (
+                    <div key={emotion.label} className="flex items-center justify-between">
+                      <span className="text-sm font-sans font-medium capitalize">{emotion.label}</span>
+                      <div className="flex items-center gap-2">
+                        <div className="w-32 h-2 bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary transition-all"
+                            style={{ width: `${Math.min(emotion.score * 100, 100)}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-muted-foreground font-sans w-10 text-right">
+                          {(emotion.score * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Metadata */}
+            {analysisResult.metadata && Object.keys(analysisResult.metadata).length > 0 && (
+              <div>
+                <h3 className="text-sm font-medium font-sans text-muted-foreground mb-3">Metadata</h3>
+                <div className="text-xs bg-muted/30 rounded-lg p-3 overflow-x-auto font-mono">
+                  <pre>{JSON.stringify(analysisResult.metadata, null, 2)}</pre>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+         {analysisError && (
+           <div className="mt-8 p-4 rounded-lg bg-destructive/10 text-destructive text-sm font-sans">
+             <p className="font-medium mb-3">Analysis failed: {analysisError}</p>
+             {/* Show specific error details */}
+             {Boolean(analysisMetadata?.summary_errors) && (
+               <div className="mt-3 p-2 rounded-md bg-destructive/20">
+                 <p className="font-medium text-xs mb-1">Summary errors:</p>
+                 <pre className="whitespace-pre-wrap text-xs font-mono overflow-auto max-h-40">
+                   {JSON.stringify(analysisMetadata?.summary_errors, null, 2)}
+                 </pre>
+               </div>
+             )}
+             {Boolean(analysisMetadata?.emotion_errors) && (
+               <div className="mt-3 p-2 rounded-md bg-destructive/20">
+                 <p className="font-medium text-xs mb-1">Emotion errors:</p>
+                 <pre className="whitespace-pre-wrap text-xs font-mono overflow-auto max-h-40">
+                   {JSON.stringify(analysisMetadata?.emotion_errors, null, 2)}
+                 </pre>
+               </div>
+             )}
+           </div>
+         )}
+         {analysisMetadata && (
+           <div className="mt-4 p-3 rounded-md bg-destructive/10 text-destructive text-sm font-sans">
+             <p className="font-medium">Analyzer metadata (for debugging):</p>
+             <pre className="whitespace-pre-wrap text-xs">{JSON.stringify(analysisMetadata, null, 2)}</pre>
+           </div>
+         )}
       </div>
     </div>
   );

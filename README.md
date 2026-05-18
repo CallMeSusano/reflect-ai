@@ -18,7 +18,35 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+## Start the backend with one command
+
+If you also want the Python journal-analyzer backend, you can start it from the repo root without typing the full setup sequence:
+
+```powershell
+npm run backend
+```
+
+That command calls `backend/start-backend.ps1`, which uses `backend/.venv` when it exists, creates it if needed, and starts FastAPI on `http://127.0.0.1:8000`.
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+
+## Frontend test path (without Firebase)
+
+If Firebase is not configured yet, you can still test the Hugging Face/Python integration from the frontend:
+
+1. Start the Python backend (FastAPI) in `backend/`. (See `backend/README.md` for instructions.)
+2. Set the analyzer backend URL for Next.js:
+
+```bash
+# Windows PowerShell example
+$env:ANALYZER_API_URL="http://127.0.0.1:8000"
+```
+
+3. Start Next.js with `npm run dev` and open:
+
+`Test Analyzer (no login)`: (http://localhost:3000/test-analyzer)
+
+This page uploads a `.txt` file and calls `app/api/analyze-file/route.ts`, which proxies the request to the Python backend.
 
 ## Learn More
 

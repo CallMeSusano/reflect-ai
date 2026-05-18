@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+python-multipart
+python-dotenv
+huggingface-hub
+transformers
+torch
+aiohttp
+pydantic
+httpx
+pytest
+pytest-asyncio
+
