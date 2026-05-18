@@ -1,10 +1,15 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-export function proxy(request: NextRequest) { // ← was "proxy"
+export function proxy(request: NextRequest) {
   const token = request.cookies.get("auth-token")?.value;
 
   if (request.nextUrl.pathname.startsWith("/journal")) {
+    if (!token) {
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
+  }
+  if (request.nextUrl.pathname.startsWith("/assistant")) {
     if (!token) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
@@ -26,5 +31,5 @@ export function proxy(request: NextRequest) { // ← was "proxy"
 }
 
 export const config = {
-  matcher: ["/journal/:path*", "/login", "/"],
+  matcher: ["/journal/:path*", "/assistant/:path*", "/login", "/"],
 };
