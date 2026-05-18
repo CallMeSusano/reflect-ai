@@ -1,24 +1,26 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const token = request.cookies.get("auth-token")?.value;
 
-  // Protect the journal route and its sub-routes
   if (request.nextUrl.pathname.startsWith("/journal")) {
     if (!token) {
       return NextResponse.redirect(new URL("/login", request.url));
     }
   }
+  if (request.nextUrl.pathname.startsWith("/assistant")) {
+    if (!token) {
+      return NextResponse.redirect(new URL("/login", request.url));
+    }
+  }
 
-  // Redirect authenticated users away from the login page
   if (request.nextUrl.pathname === "/login") {
     if (token) {
       return NextResponse.redirect(new URL("/journal", request.url));
     }
   }
 
-  // Redirect authenticated users from landing page to journal
   if (request.nextUrl.pathname === "/") {
     if (token) {
       return NextResponse.redirect(new URL("/journal", request.url));
@@ -29,5 +31,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/journal/:path*", "/login", "/"],
+  matcher: ["/journal/:path*", "/assistant/:path*", "/login", "/"],
 };
