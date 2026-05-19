@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
-import { ThemeToggle } from "@/components/theme-toggle";
+import { useTranslation } from "react-i18next";
+import { Navbar } from "@/components/navbar";
 
 const DEMO_ENTRIES = [
   {
@@ -23,24 +23,6 @@ const DEMO_ENTRIES = [
     mood: "Peaceful",
     moodColor: "bg-sky-100 text-sky-800",
     date: "Last week"
-  }
-];
-
-const FEATURES = [
-  {
-    icon: "✦",
-    title: "AI-powered reflection prompts",
-    description: "When you're stuck, our AI asks exactly the right question to unlock what you're really feeling."
-  },
-  {
-    icon: "◈",
-    title: "Mood tracking over time",
-    description: "See patterns in your emotional landscape — weekly, monthly, across the whole year."
-  },
-  {
-    icon: "⬡",
-    title: "Completely private",
-    description: "Your entries are encrypted. Not even we can read them. This is your space, entirely."
   }
 ];
 
@@ -74,10 +56,29 @@ function TypewriterText({ text }: { text: string }) {
 }
 
 export default function Home() {
+  const { t } = useTranslation();
   const [activeEntry, setActiveEntry] = useState(0);
   const [firstLine, setFirstLine] = useState("");
   const [focused, setFocused] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const FEATURES = [
+    {
+      icon: "✦",
+      title: t("landing.features.aiPrompts"),
+      description: t("landing.features.aiPromptsDesc"),
+    },
+    {
+      icon: "◈",
+      title: t("landing.features.moodTracking"),
+      description: t("landing.features.moodTrackingDesc"),
+    },
+    {
+      icon: "⬡",
+      title: t("landing.features.private"),
+      description: t("landing.features.privateDesc"),
+    },
+  ];
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -91,28 +92,7 @@ export default function Home() {
   return (
     <div className="flex flex-col min-h-svh bg-background text-foreground font-serif">
 
-      {/* Header */}
-      <header className="px-6 md:px-10 py-5 flex items-center justify-between border-b border-border/40 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-        <div className="flex items-center gap-3">
-          <div className="h-7 w-7 rounded-sm bg-foreground flex items-center justify-center">
-            <span className="text-background font-bold text-sm font-sans">R</span>
-          </div>
-          <span className="font-medium tracking-wide text-foreground/90 text-[15px] font-sans">Reflect</span>
-        </div>
-        <nav className="flex items-center gap-1">
-          <ThemeToggle />
-          <Link href="/login">
-            <button className="px-4 py-2 text-sm text-muted-foreground hover:text-foreground transition-colors font-sans">
-              Sign in
-            </button>
-          </Link>
-          <Link href="/login">
-            <button className="px-4 py-2 text-sm bg-foreground text-background rounded-md font-medium hover:bg-foreground/90 transition-colors font-sans">
-              Start free
-            </button>
-          </Link>
-        </nav>
-      </header>
+      <Navbar mode="landing" />
 
       <main className="flex-1">
 
@@ -125,25 +105,24 @@ export default function Home() {
               ))}
             </div>
             <span className="text-sm text-muted-foreground font-sans">
-              12,400 entries written this week
+              {t("landing.entriesThisWeek", { count: "12,400" })}
             </span>
           </div>
 
           <h1 className="text-5xl md:text-7xl font-normal leading-[1.05] tracking-tight mb-8 max-w-3xl">
-            The journal that{" "}
-            <em className="italic text-foreground/50">actually</em>{" "}
-            helps you understand yourself.
+            {t("landing.headlineStart")}{" "}
+            <em className="italic text-foreground/50">{t("landing.headlineEm")}</em>{" "}
+            {t("landing.headlineEnd")}
           </h1>
 
           <p className="text-lg md:text-xl text-muted-foreground leading-relaxed max-w-xl mb-12 font-sans">
-            Daily prompts, mood tracking, and AI insights — all inside a writing experience 
-            so calm you'll actually come back to it.
+            {t("landing.subheadline")}
           </p>
 
-          {/* First-line CTA — the conversion hook */}
+          {/* First-line CTA */}
           <div className="max-w-2xl">
             <p className="text-xs text-muted-foreground mb-3 uppercase tracking-widest font-sans">
-              Start your first entry
+              {t("landing.startFirstEntry")}
             </p>
             <div
               className={`flex items-center gap-3 px-5 py-4 rounded-xl border transition-all duration-200 ${
@@ -160,19 +139,17 @@ export default function Home() {
                 onChange={e => setFirstLine(e.target.value)}
                 onFocus={() => setFocused(true)}
                 onBlur={() => setFocused(false)}
-                placeholder="Today I realized…"
+                placeholder={t("landing.inputPlaceholder")}
                 className="flex-1 bg-transparent outline-none text-foreground/90 placeholder-muted-foreground text-lg font-serif"
               />
               <Link href={`/login?first=${encodeURIComponent(firstLine)}`}>
-                <button
-                  className="shrink-0 px-4 py-2 bg-foreground text-background text-sm font-semibold rounded-lg hover:bg-foreground/90 transition-colors font-sans"
-                >
-                  Continue →
+                <button className="shrink-0 px-4 py-2 bg-foreground text-background text-sm font-semibold rounded-lg hover:bg-foreground/90 transition-colors font-sans">
+                  {t("landing.continueBtn")}
                 </button>
               </Link>
             </div>
             <p className="text-xs text-muted-foreground/60 mt-2 ml-1 font-sans">
-              Free forever · No credit card · Takes 30 seconds
+              {t("landing.freeForever")}
             </p>
           </div>
         </section>
@@ -182,10 +159,10 @@ export default function Home() {
           <div className="max-w-5xl mx-auto grid md:grid-cols-2 gap-12 items-center">
             <div>
               <p className="text-xs uppercase tracking-widest text-muted-foreground mb-4 font-sans">
-                Real entries from real people
+                {t("landing.realEntriesLabel")}
               </p>
               <h2 className="text-3xl md:text-4xl font-normal leading-tight mb-6">
-                The things you write here,<br />you carry differently.
+                {t("landing.realEntriesHeadline")}
               </h2>
               <div className="flex gap-2 mt-8">
                 {DEMO_ENTRIES.map((_, i) => (
@@ -241,13 +218,15 @@ export default function Home() {
         {/* Final CTA */}
         <section className="px-6 md:px-10 py-20 border-t border-border/40 text-center">
           <div className="max-w-2xl mx-auto">
-            <p className="text-sm text-muted-foreground mb-4 font-sans">Join 14,000+ daily writers</p>
-            <h2 className="text-4xl md:text-5xl font-normal mb-8 leading-tight">
-              Five minutes a day.<br />A lifetime of clarity.
+            <p className="text-sm text-muted-foreground mb-4 font-sans">
+              {t("landing.joinWriters", { count: "14,000+" })}
+            </p>
+            <h2 className="text-4xl md:text-5xl font-normal mb-8 leading-tight whitespace-pre-line">
+              {t("landing.cta")}
             </h2>
             <Link href="/login">
               <button className="px-8 py-4 bg-foreground text-background text-base font-semibold rounded-xl hover:bg-foreground/90 transition-colors font-sans">
-                Create your free account
+                {t("landing.createAccount")}
               </button>
             </Link>
           </div>
@@ -256,11 +235,11 @@ export default function Home() {
 
       <footer className="px-6 md:px-10 py-8 border-t border-border/40 flex flex-col sm:flex-row items-center justify-between gap-4">
         <span className="text-sm text-muted-foreground font-sans">
-          © {new Date().getFullYear()} Reflect AI
+          {t("landing.footerCopyright", { year: new Date().getFullYear() })}
         </span>
         <div className="flex gap-6 text-sm text-muted-foreground font-sans">
-          <a href="#" className="hover:text-foreground/80 transition-colors">Privacy</a>
-          <a href="#" className="hover:text-foreground/80 transition-colors">Terms</a>
+          <a href="#" className="hover:text-foreground/80 transition-colors">{t("landing.privacy")}</a>
+          <a href="#" className="hover:text-foreground/80 transition-colors">{t("landing.terms")}</a>
         </div>
       </footer>
     </div>

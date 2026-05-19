@@ -10,7 +10,7 @@ function buildBackendUrl() {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { text } = body;
+    const { text, language } = body;
 
     if (!text || typeof text !== "string") {
       return NextResponse.json(
@@ -32,7 +32,7 @@ export async function POST(request: Request) {
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, language: language ?? "en" }),
       cache: "no-store",
     });
 

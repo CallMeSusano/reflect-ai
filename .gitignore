@@ -43,3 +43,5 @@ yarn-error.log*
 next-env.d.ts
 test/
 appios/
+__pycache__/
+backend/tests/test_analyzer_aistudio.py

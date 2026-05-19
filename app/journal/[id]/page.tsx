@@ -3,14 +3,23 @@
 import { useEffect, useState, use } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { doc, getDoc, deleteDoc } from "firebase/firestore";
+import { doc, getDoc, deleteDoc, updateDoc } from "firebase/firestore";
+import { useTranslation } from "react-i18next";
 import { auth, db } from "@/firebase";
-
-/* ─── Types ─────────────────────────────────────────────────── */
+import { AnalysisLoader } from "@/components/analysis-loader";
+import { AnalysisCard } from "@/components/analysis-card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 
 interface SavedMediaFile {
   type: "photos" | "videos";
   filename: string;
+}
+
+interface EntryAnalysis {
+  summary: string;
+  mood: string;
+  generatedAt: number;
 }
 
 interface JournalEntry {
@@ -21,20 +30,24 @@ interface JournalEntry {
   media: SavedMediaFile[];
   userId: string;
   createdAt: number;
+  analysis?: EntryAnalysis;
 }
 
-/* ─── Mood palettes ──────────────────────────────────────────── */
+const MOOD_PALETTES: Record<string, { accentText: string }> = {
+  happy:    { accentText: "text-amber-500" },
+  sad:      { accentText: "text-blue-500" },
+  anxious:  { accentText: "text-rose-500" },
+  grateful: { accentText: "text-green-500" },
+  angry:    { accentText: "text-orange-500" },
+  peaceful: { accentText: "text-teal-500" },
+  proud:    { accentText: "text-purple-500" },
+  relieved: { accentText: "text-emerald-500" },
+  default:  { accentText: "text-muted-foreground" },
+};
 
-const MOOD_PALETTES: Record<string, { accentText: string; accentBorder: string; pill: string }> = {
-  happy:    { accentText: "text-amber-500",   accentBorder: "border-amber-400/40",   pill: "bg-amber-50 dark:bg-amber-950/30" },
-  sad:      { accentText: "text-blue-500",    accentBorder: "border-blue-400/40",    pill: "bg-blue-50 dark:bg-blue-950/30" },
-  anxious:  { accentText: "text-rose-500",    accentBorder: "border-rose-400/40",    pill: "bg-rose-50 dark:bg-rose-950/30" },
-  grateful: { accentText: "text-green-500",   accentBorder: "border-green-400/40",   pill: "bg-green-50 dark:bg-green-950/30" },
-  angry:    { accentText: "text-orange-500",  accentBorder: "border-orange-400/40",  pill: "bg-orange-50 dark:bg-orange-950/30" },
-  peaceful: { accentText: "text-teal-500",    accentBorder: "border-teal-400/40",    pill: "bg-teal-50 dark:bg-teal-950/30" },
-  proud:    { accentText: "text-purple-500",  accentBorder: "border-purple-400/40",  pill: "bg-purple-50 dark:bg-purple-950/30" },
-  relieved: { accentText: "text-emerald-500", accentBorder: "border-emerald-400/40", pill: "bg-emerald-50 dark:bg-emerald-950/30" },
-  default:  { accentText: "text-muted-foreground", accentBorder: "border-border",    pill: "bg-muted/30" },
+const MOOD_EMOJI: Record<string, string> = {
+  happy: "😊", sad: "😢", anxious: "😰", grateful: "🙏",
+  angry: "😤", peaceful: "😌", proud: "💪", relieved: "😮‍💨", default: "✦",
 };
 
 function getMoodPalette(mood: string) {
@@ -45,19 +58,24 @@ function getMoodPalette(mood: string) {
   );
 }
 
-/* ─── Word count ─────────────────────────────────────────────── */
+function getMoodEmoji(mood: string) {
+  const lower = mood?.toLowerCase() ?? "";
+  return (
+    Object.entries(MOOD_EMOJI).find(([key]) => lower.includes(key))?.[1] ??
+    MOOD_EMOJI.default
+  );
+}
 
 function WordCount({ text }: { text: string }) {
+  const { t } = useTranslation();
   const words = text.trim() ? text.trim().split(/\s+/).length : 0;
   const minutes = Math.ceil(words / 200);
   return (
     <span className="text-xs text-muted-foreground font-sans tabular-nums">
-      {words} words · {minutes} min read
+      {t("journalNew.wordCount", { count: words })} · {t("journalNew.minRead", { count: minutes })}
     </span>
   );
 }
-
-/* ─── Delete confirmation modal ──────────────────────────────── */
 
 function DeleteModal({
   onConfirm,
@@ -68,19 +86,18 @@ function DeleteModal({
   onCancel: () => void;
   deleting: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
-      {/* Backdrop */}
       <div
         className="absolute inset-0 bg-black/40 backdrop-blur-sm"
         onClick={!deleting ? onCancel : undefined}
       />
-      {/* Dialog */}
       <div className="relative z-10 bg-background border border-border rounded-2xl shadow-xl px-8 py-7 max-w-sm w-full mx-4 flex flex-col gap-5">
         <div className="flex flex-col gap-1.5">
-          <h2 className="text-base font-semibold font-sans text-foreground">Delete entry?</h2>
+          <h2 className="text-base font-semibold font-sans text-foreground">{t("entryPage.deleteEntry")}</h2>
           <p className="text-sm text-muted-foreground font-sans leading-relaxed">
-            This entry will be permanently deleted. You cannot undo this action.
+            {t("entryPage.deleteConfirm")}
           </p>
         </div>
         <div className="flex items-center gap-3 justify-end">
@@ -89,7 +106,7 @@ function DeleteModal({
             disabled={deleting}
             className="text-sm px-4 py-2 rounded-lg font-medium font-sans bg-muted/50 text-foreground hover:bg-muted transition-colors disabled:opacity-50"
           >
-            Cancel
+            {t("common.cancel")}
           </button>
           <button
             onClick={onConfirm}
@@ -99,10 +116,10 @@ function DeleteModal({
             {deleting ? (
               <>
                 <span className="w-3.5 h-3.5 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                Deleting…
+                {t("entryPage.deleting")}
               </>
             ) : (
-              "Delete"
+              t("common.delete")
             )}
           </button>
         </div>
@@ -111,11 +128,8 @@ function DeleteModal({
   );
 }
 
-/* ─── View media (read mode) ─────────────────────────────────── */
-
 function ViewMediaGrid({ media, apiUrl }: { media: SavedMediaFile[]; apiUrl: string }) {
   if (media.length === 0) return null;
-
   return (
     <div className="flex flex-col gap-6 mt-12 pt-8 border-t border-border/40">
       {media.map((file, idx) => (
@@ -139,9 +153,25 @@ function ViewMediaGrid({ media, apiUrl }: { media: SavedMediaFile[]; apiUrl: str
   );
 }
 
-/* ─── Page ───────────────────────────────────────────────────── */
+function EntrySkeleton() {
+  return (
+    <div className="max-w-2xl mx-auto px-6 py-12 flex flex-col gap-6">
+      <Skeleton className="h-4 w-32" />
+      <Skeleton className="h-10 w-3/4" />
+      <div className="space-y-3 mt-4">
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-5/6" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-4/5" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-3/4" />
+      </div>
+    </div>
+  );
+}
 
 export default function JournalEntryPage({ params }: { params: Promise<{ id: string }> }) {
+  const { t, i18n } = useTranslation();
   const router = useRouter();
   const resolvedParams = use(params);
   const entryId = resolvedParams.id;
@@ -152,17 +182,40 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
   const [error, setError] = useState("");
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
-  const [showAnalysis, setShowAnalysis] = useState(false);
+  const [showAnalysis, setShowAnalysis] = useState(true);
   const [analysisLoading, setAnalysisLoading] = useState(false);
   const [analysisError, setAnalysisError] = useState("");
-  const [analysisResult, setAnalysisResult] = useState<{
-    summary: string;
-    emotions: Array<{ label: string; score: number }>;
-    metadata: Record<string, unknown>;
-  } | null>(null);
-  const [analysisMetadata, setAnalysisMetadata] = useState<Record<string, unknown> | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<EntryAnalysis | null>(null);
 
-  /* Load entry */
+  const analyzeContent = async (content: string, language: string, userId: string) => {
+    setAnalysisLoading(true);
+    setAnalysisError("");
+    try {
+      const response = await fetch("/api/analyze-content", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: content, language }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        setAnalysisError(typeof payload?.detail === "string" ? payload.detail : "Analysis failed.");
+        return;
+      }
+      const result: EntryAnalysis = {
+        summary: payload.summary,
+        mood: payload.mood,
+        generatedAt: Date.now(),
+      };
+      setAnalysisResult(result);
+      setShowAnalysis(true);
+      await updateDoc(doc(db, "users", userId, "journals", entryId), { analysis: result });
+    } catch (err) {
+      setAnalysisError(err instanceof Error ? err.message : "Unexpected error.");
+    } finally {
+      setAnalysisLoading(false);
+    }
+  };
+
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged(async (user) => {
       if (user) {
@@ -179,8 +232,14 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
               media: data.media || [],
               userId: data.userId || "",
               createdAt: typeof data.createdAt === "number" ? data.createdAt : Date.now(),
+              analysis: data.analysis || undefined,
             };
             setEntry(loaded);
+            if (data.analysis) {
+              setAnalysisResult(data.analysis);
+            } else if (data.content?.trim()) {
+              analyzeContent(data.content, i18n.language, user.uid);
+            }
           }
         } catch (err) {
           console.error(err);
@@ -209,52 +268,24 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
     }
   };
 
-  const handleAnalyze = async () => {
-    setAnalysisLoading(true);
-    setAnalysisError("");
-    try {
-      const response = await fetch("/api/analyze-content", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ text: entry?.content || "" }),
-      });
-
-      const payload = await response.json().catch(() => null);
-
-      // Always capture any metadata the analyzer returned (either under
-      // `upstream` for surfaced errors or `metadata` for successful results)
-      setAnalysisMetadata(payload?.upstream ?? payload?.metadata ?? null);
-
-      if (!response.ok) {
-        setAnalysisError(
-          typeof payload?.detail === "string"
-            ? payload.detail
-            : "Analysis request failed."
-        );
-        return;
-      }
-
-      setAnalysisResult(payload);
-      setShowAnalysis(true);
-    } catch (err) {
-      setAnalysisError(
-        err instanceof Error ? err.message : "Unexpected network error."
-      );
-    } finally {
-      setAnalysisLoading(false);
-    }
+  const handleRegenerate = () => {
+    if (!entry || !auth.currentUser) return;
+    analyzeContent(entry.content, i18n.language, auth.currentUser.uid);
   };
-
-  /* ─── Render guards ─────────────────────────────────────────── */
 
   if (loading) {
     return (
-      <div className="flex flex-col items-center justify-center py-20 gap-3">
-          <div className="w-8 h-8 rounded-full border-2 border-primary/20 border-t-primary/60 animate-spin" />
-          <p className="text-sm text-muted-foreground font-sans">Loading your entry…</p>
+      <div className="flex-1 bg-background text-foreground font-serif">
+        <div className="sticky top-14 z-10 backdrop-blur-sm border-b border-border/40 px-6 py-3 flex items-center justify-between bg-background/95">
+          <Skeleton className="h-4 w-16" />
+          <Skeleton className="h-4 w-24" />
+          <div className="flex gap-2">
+            <Skeleton className="h-8 w-14" />
+            <Skeleton className="h-8 w-16" />
+          </div>
         </div>
+        <EntrySkeleton />
+      </div>
     );
   }
 
@@ -262,27 +293,22 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
     return (
       <div className="flex-1 flex items-center justify-center bg-background font-sans">
         <div className="text-center">
-          <p className="text-foreground mb-4">Entry not found or unauthorized.</p>
+          <p className="text-foreground mb-4">{t("entryPage.notFound")}</p>
           <Link href="/journal" className="text-sm underline text-muted-foreground">
-            Return to journal
+            {t("entryPage.returnToJournal")}
           </Link>
         </div>
       </div>
     );
   }
 
-  /* ─── Derived state ─────────────────────────────────────────── */
-
   const palette = getMoodPalette(entry.mood);
-
-  const formattedDate = new Date(entry.createdAt).toLocaleDateString("en-US", {
+  const formattedDate = new Date(entry.createdAt).toLocaleDateString(i18n.language, {
     weekday: "long",
     month: "long",
     day: "numeric",
     year: "numeric",
   });
-
-  /* ─── JSX ───────────────────────────────────────────────────── */
 
   return (
     <div className="flex-1 transition-colors duration-500 bg-background text-foreground font-serif">
@@ -299,31 +325,25 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
           href="/journal"
           className="text-sm flex items-center gap-1.5 opacity-50 hover:opacity-80 transition-opacity font-sans"
         >
-          ← Back
+          {t("entryPage.back")}
         </Link>
 
         <WordCount text={entry.content} />
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={handleAnalyze}
-            disabled={analysisLoading}
-            className="text-sm px-4 py-1.5 rounded-lg font-medium transition-opacity hover:opacity-80 bg-primary/10 text-primary font-sans disabled:opacity-50"
-          >
-            {analysisLoading ? "Analyzing…" : "Analyze"}
-          </button>
-          <Link
-            href={`/journal/${entryId}/edit`}
-            className="text-sm px-4 py-1.5 rounded-lg font-medium transition-opacity hover:opacity-80 bg-muted/50 text-foreground font-sans"
-          >
-            Edit
+          <Link href={`/journal/${entryId}/edit`}>
+            <Button variant="ghost" size="sm" className="font-sans text-sm">
+              {t("common.edit")}
+            </Button>
           </Link>
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setShowDeleteModal(true)}
-            className="text-sm px-4 py-1.5 rounded-lg font-medium transition-opacity hover:bg-destructive/10 text-destructive/70 hover:text-destructive font-sans"
+            className="font-sans text-sm text-destructive/70 hover:text-destructive hover:bg-destructive/10"
           >
-            Delete
-          </button>
+            {t("common.delete")}
+          </Button>
         </div>
       </div>
 
@@ -353,94 +373,54 @@ export default function JournalEntryPage({ params }: { params: Promise<{ id: str
 
         <ViewMediaGrid media={entry.media} apiUrl={apiUrl} />
 
-        {/* Analysis Section */}
-        {showAnalysis && analysisResult && (
+        {analysisLoading && (
           <div className="mt-12 pt-8 border-t border-border/40">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-serif">Analysis</h2>
-              <button
-                onClick={() => setShowAnalysis(false)}
-                className="text-xs opacity-50 hover:opacity-80 font-sans"
-              >
-                Hide
-              </button>
-            </div>
-
-            {/* Summary */}
-            {analysisResult.summary && (
-              <div className="mb-8">
-                <h3 className="text-sm font-medium font-sans text-muted-foreground mb-3">Summary</h3>
-                <p className="text-base leading-relaxed font-serif text-foreground/80">
-                  {analysisResult.summary}
-                </p>
-              </div>
-            )}
-
-            {/* Emotions */}
-            {analysisResult.emotions && analysisResult.emotions.length > 0 && (
-              <div className="mb-8">
-                <h3 className="text-sm font-medium font-sans text-muted-foreground mb-3">Detected Emotions</h3>
-                <div className="grid gap-3">
-                  {analysisResult.emotions.map((emotion) => (
-                    <div key={emotion.label} className="flex items-center justify-between">
-                      <span className="text-sm font-sans font-medium capitalize">{emotion.label}</span>
-                      <div className="flex items-center gap-2">
-                        <div className="w-32 h-2 bg-muted rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-primary transition-all"
-                            style={{ width: `${Math.min(emotion.score * 100, 100)}%` }}
-                          />
-                        </div>
-                        <span className="text-xs text-muted-foreground font-sans w-10 text-right">
-                          {(emotion.score * 100).toFixed(1)}%
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Metadata */}
-            {analysisResult.metadata && Object.keys(analysisResult.metadata).length > 0 && (
-              <div>
-                <h3 className="text-sm font-medium font-sans text-muted-foreground mb-3">Metadata</h3>
-                <div className="text-xs bg-muted/30 rounded-lg p-3 overflow-x-auto font-mono">
-                  <pre>{JSON.stringify(analysisResult.metadata, null, 2)}</pre>
-                </div>
-              </div>
-            )}
+            <AnalysisLoader label={t("entryPage.analyzing")} />
           </div>
         )}
 
-         {analysisError && (
-           <div className="mt-8 p-4 rounded-lg bg-destructive/10 text-destructive text-sm font-sans">
-             <p className="font-medium mb-3">Analysis failed: {analysisError}</p>
-             {/* Show specific error details */}
-             {Boolean(analysisMetadata?.summary_errors) && (
-               <div className="mt-3 p-2 rounded-md bg-destructive/20">
-                 <p className="font-medium text-xs mb-1">Summary errors:</p>
-                 <pre className="whitespace-pre-wrap text-xs font-mono overflow-auto max-h-40">
-                   {JSON.stringify(analysisMetadata?.summary_errors, null, 2)}
-                 </pre>
-               </div>
-             )}
-             {Boolean(analysisMetadata?.emotion_errors) && (
-               <div className="mt-3 p-2 rounded-md bg-destructive/20">
-                 <p className="font-medium text-xs mb-1">Emotion errors:</p>
-                 <pre className="whitespace-pre-wrap text-xs font-mono overflow-auto max-h-40">
-                   {JSON.stringify(analysisMetadata?.emotion_errors, null, 2)}
-                 </pre>
-               </div>
-             )}
-           </div>
-         )}
-         {analysisMetadata && (
-           <div className="mt-4 p-3 rounded-md bg-destructive/10 text-destructive text-sm font-sans">
-             <p className="font-medium">Analyzer metadata (for debugging):</p>
-             <pre className="whitespace-pre-wrap text-xs">{JSON.stringify(analysisMetadata, null, 2)}</pre>
-           </div>
-         )}
+        {!analysisLoading && showAnalysis && analysisResult && (
+          <div className="mt-12 pt-8 border-t border-border/40">
+            <AnalysisCard
+              onHide={() => setShowAnalysis(false)}
+              hideLabel={t("entryPage.hide")}
+              onRegenerate={handleRegenerate}
+              regenerateLabel={t("entryPage.regenerate")}
+              regenerating={analysisLoading}
+            >
+              {analysisResult.summary && (
+                <p className="text-base leading-[1.85] font-serif text-neutral-700 dark:text-neutral-100 mb-5">
+                  {analysisResult.summary}
+                </p>
+              )}
+              {analysisResult.mood && (
+                <div className="flex items-center gap-2.5 pt-4 border-t border-rose-200/40 dark:border-blue-900/40">
+                  <span className="text-xl leading-none">{getMoodEmoji(analysisResult.mood)}</span>
+                  <span className="text-sm font-sans font-medium capitalize text-neutral-500 dark:text-neutral-400">
+                    {analysisResult.mood}
+                  </span>
+                </div>
+              )}
+            </AnalysisCard>
+          </div>
+        )}
+
+        {!analysisLoading && !showAnalysis && analysisResult && (
+          <div className="mt-12 pt-8 border-t border-border/40">
+            <button
+              onClick={() => setShowAnalysis(true)}
+              className="text-sm font-sans text-muted-foreground hover:text-foreground transition-colors"
+            >
+              {t("entryPage.showReflection")}
+            </button>
+          </div>
+        )}
+
+        {analysisError && !analysisLoading && (
+          <div className="mt-8 p-4 rounded-2xl bg-destructive/8 text-destructive text-sm font-sans border border-destructive/15">
+            {t("entryPage.analysisFailed")} {analysisError}
+          </div>
+        )}
       </div>
     </div>
   );

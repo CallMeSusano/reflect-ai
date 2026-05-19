@@ -3,12 +3,15 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
+import { signInWithEmailAndPassword, createUserWithEmailAndPassword, signInWithPopup } from "firebase/auth";
+import { useTranslation } from "react-i18next";
 import { auth, googleProvider } from "@/firebase";
 import { setAuthCookie } from "@/app/actions/auth";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { LanguageSwitcher } from "@/components/language-switcher";
 
 export default function LoginPage() {
+  const { t } = useTranslation();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -16,36 +19,23 @@ export default function LoginPage() {
   const router = useRouter();
 
   const handleAuthSuccess = async (user: any) => {
-    console.log("[auth] handleAuthSuccess called for:", user.email);
     try {
-      console.log("[auth] getting ID token...");
       const token = await user.getIdToken();
-      console.log("[auth] token obtained, length:", token.length);
-      
-      console.log("[auth] calling setAuthCookie...");
       await setAuthCookie(token);
-      console.log("[auth] cookie set successfully");
-      
-      console.log("[auth] redirecting to /journal...");
       router.push("/journal");
-      console.log("[auth] router.push called");
     } catch (err) {
       console.error("[auth] handleAuthSuccess failed:", err);
     }
   };
 
-  const handleEmailLogin = async (e: React.FormEvent) => {
+  const handleEmailLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    console.log("[login] attempting email login for:", email);
     setIsLoading(true);
     setError("");
     try {
-      console.log("[login] calling signInWithEmailAndPassword...");
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      console.log("[login] sign in successful:", userCredential.user.email);
       await handleAuthSuccess(userCredential.user);
     } catch (err: any) {
-      console.error("[login] email login failed:", err.code, err.message);
       setError(err.message || "Failed to log in");
     } finally {
       setIsLoading(false);
@@ -53,16 +43,12 @@ export default function LoginPage() {
   };
 
   const handleEmailSignup = async () => {
-    console.log("[signup] attempting signup for:", email);
     setIsLoading(true);
     setError("");
     try {
-      console.log("[signup] calling createUserWithEmailAndPassword...");
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      console.log("[signup] signup successful:", userCredential.user.email);
       await handleAuthSuccess(userCredential.user);
     } catch (err: any) {
-      console.error("[signup] failed:", err.code, err.message);
       setError(err.message || "Failed to sign up");
     } finally {
       setIsLoading(false);
@@ -70,16 +56,12 @@ export default function LoginPage() {
   };
 
   const handleGoogleLogin = async () => {
-    console.log("[google] attempting Google login...");
     setIsLoading(true);
     setError("");
     try {
-      console.log("[google] calling signInWithPopup...");
       const userCredential = await signInWithPopup(auth, googleProvider);
-      console.log("[google] popup success:", userCredential.user.email);
       await handleAuthSuccess(userCredential.user);
     } catch (err: any) {
-      console.error("[google] failed:", err.code, err.message);
       setError(err.message || "Failed to log in with Google");
     } finally {
       setIsLoading(false);
@@ -88,7 +70,8 @@ export default function LoginPage() {
 
   return (
     <div className="flex min-h-svh items-center justify-center p-4 bg-background text-foreground font-serif relative">
-      <div className="absolute top-4 right-6">
+      <div className="absolute top-4 right-6 flex items-center gap-1">
+        <LanguageSwitcher />
         <ThemeToggle />
       </div>
       <div className="w-full max-w-sm rounded-2xl border bg-card/40 p-8 shadow-2xl backdrop-blur-sm">
@@ -98,14 +81,16 @@ export default function LoginPage() {
               <span className="text-background font-bold text-lg font-sans">R</span>
             </div>
           </Link>
-          <h1 className="text-3xl font-light mb-2">Welcome back</h1>
-          <p className="text-sm text-muted-foreground font-sans">Sign in to continue your reflections.</p>
+          <h1 className="text-3xl font-light mb-2">{t("login.welcomeBack")}</h1>
+          <p className="text-sm text-muted-foreground font-sans">{t("login.subtitle")}</p>
         </div>
 
         <div className="grid gap-6">
           <form onSubmit={handleEmailLogin} className="grid gap-4">
             <div className="grid gap-2">
-              <label htmlFor="email" className="text-xs text-muted-foreground uppercase tracking-widest font-sans">Email</label>
+              <label htmlFor="email" className="text-xs text-muted-foreground uppercase tracking-widest font-sans">
+                {t("auth.email")}
+              </label>
               <input
                 id="email"
                 type="email"
@@ -117,10 +102,12 @@ export default function LoginPage() {
               />
             </div>
             <div className="grid gap-2">
-              <label htmlFor="password" className="text-xs text-muted-foreground uppercase tracking-widest font-sans">Password</label>
-              <input 
-                id="password" 
-                type="password" 
+              <label htmlFor="password" className="text-xs text-muted-foreground uppercase tracking-widest font-sans">
+                {t("auth.password")}
+              </label>
+              <input
+                id="password"
+                type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -128,40 +115,38 @@ export default function LoginPage() {
               />
             </div>
             {error && <p className="text-sm text-red-500 font-sans">{error}</p>}
-            
+
             <div className="flex flex-col gap-3 mt-2">
-              <button 
-                type="submit" 
+              <button
+                type="submit"
                 disabled={isLoading}
                 className="w-full px-4 py-2.5 bg-foreground text-background font-medium rounded-lg hover:bg-foreground/90 transition-colors disabled:opacity-50 font-sans text-sm"
               >
-                {isLoading ? "Signing in..." : "Sign in"}
+                {isLoading ? t("login.signingIn") : t("nav.signIn")}
               </button>
-              <button 
-                type="button" 
-                onClick={handleEmailSignup} 
+              <button
+                type="button"
+                onClick={handleEmailSignup}
                 disabled={isLoading}
                 className="w-full px-4 py-2.5 bg-transparent border text-foreground font-medium rounded-lg hover:bg-muted/50 transition-colors disabled:opacity-50 font-sans text-sm"
               >
-                Create account
+                {t("login.createAccount")}
               </button>
             </div>
           </form>
-          
+
           <div className="relative my-2">
             <div className="absolute inset-0 flex items-center">
               <span className="w-full border-t" />
             </div>
             <div className="relative flex justify-center text-xs uppercase tracking-widest font-sans">
-              <span className="bg-card px-3 text-muted-foreground">
-                Or
-              </span>
+              <span className="bg-card px-3 text-muted-foreground">{t("login.or")}</span>
             </div>
           </div>
-          
-          <button 
-            type="button" 
-            disabled={isLoading} 
+
+          <button
+            type="button"
+            disabled={isLoading}
             onClick={handleGoogleLogin}
             className="w-full flex items-center justify-center gap-3 px-4 py-2.5 bg-background/50 border text-foreground font-medium rounded-lg hover:bg-muted transition-colors disabled:opacity-50 font-sans text-sm"
           >
@@ -171,7 +156,7 @@ export default function LoginPage() {
               <path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/>
               <path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/>
             </svg>
-            Continue with Google
+            {t("login.continueWithGoogle")}
           </button>
         </div>
       </div>

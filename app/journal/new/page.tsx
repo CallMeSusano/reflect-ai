@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, Suspense } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { collection, addDoc } from "firebase/firestore";
+import { useTranslation } from "react-i18next";
 import { auth, db } from "@/firebase";
 import { Image as ImageIcon, Video as VideoIcon, X, Upload, FileImage, FileVideo } from "lucide-react";
 
@@ -12,7 +13,7 @@ interface StagedFile {
   file: File;
   type: "photos" | "videos";
   previewUrl: string;
-  uploadProgress: number; // 0–100, -1 = error
+  uploadProgress: number;
 }
 
 interface SavedMediaFile {
@@ -41,11 +42,12 @@ function getMoodPalette(mood: string) {
 }
 
 function WordCount({ text }: { text: string }) {
+  const { t } = useTranslation();
   const words = text.trim() ? text.trim().split(/\s+/).length : 0;
   const minutes = Math.ceil(words / 200);
   return (
     <span className="text-xs text-muted-foreground font-sans tabular-nums">
-      {words} words · {minutes} min read
+      {words} {t("journalNew.wordCount", { count: words })} · {t("journalNew.minRead", { count: minutes })}
     </span>
   );
 }
@@ -59,42 +61,30 @@ function MediaGrid({
   onRemove: (id: string) => void;
   uploading: boolean;
 }) {
+  const { t } = useTranslation();
   if (files.length === 0) return null;
 
   return (
     <div className="mt-8 pt-6 border-t border-border/40">
       <p className="text-xs text-muted-foreground font-sans mb-3 uppercase tracking-wider">
-        Attachments · {files.length}
+        {t("journalNew.attachments")} · {files.length}
       </p>
       <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
         {files.map((f) => (
           <div key={f.id} className="relative group rounded-xl overflow-hidden aspect-square bg-muted/30 border border-border/50">
             {f.type === "photos" ? (
-              <img
-                src={f.previewUrl}
-                alt=""
-                className="w-full h-full object-cover"
-              />
+              <img src={f.previewUrl} alt="" className="w-full h-full object-cover" />
             ) : (
-              <video
-                src={f.previewUrl}
-                className="w-full h-full object-cover bg-black"
-                muted
-              />
+              <video src={f.previewUrl} className="w-full h-full object-cover bg-black" muted />
             )}
 
-            {/* Type badge */}
             <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1 bg-black/50 text-white rounded-md px-1.5 py-0.5 backdrop-blur-sm">
-              {f.type === "photos"
-                ? <FileImage className="w-3 h-3" />
-                : <FileVideo className="w-3 h-3" />
-              }
+              {f.type === "photos" ? <FileImage className="w-3 h-3" /> : <FileVideo className="w-3 h-3" />}
               <span className="text-[10px] font-sans font-medium">
-                {f.type === "photos" ? "Photo" : "Video"}
+                {f.type === "photos" ? t("journalNew.photo") : t("journalNew.video")}
               </span>
             </div>
 
-            {/* Upload progress overlay */}
             {uploading && f.uploadProgress < 100 && f.uploadProgress >= 0 && (
               <div className="absolute inset-0 bg-black/50 flex flex-col items-center justify-center gap-2">
                 <div className="w-3/4 h-1 bg-white/20 rounded-full overflow-hidden">
@@ -107,14 +97,12 @@ function MediaGrid({
               </div>
             )}
 
-            {/* Error overlay */}
             {f.uploadProgress === -1 && (
               <div className="absolute inset-0 bg-destructive/60 flex items-center justify-center">
-                <span className="text-white text-[10px] font-sans font-medium">Failed</span>
+                <span className="text-white text-[10px] font-sans font-medium">{t("journalNew.uploadFailed")}</span>
               </div>
             )}
 
-            {/* Remove button – hidden while uploading */}
             {!uploading && (
               <button
                 type="button"
@@ -133,6 +121,7 @@ function MediaGrid({
 }
 
 function NewJournalContent() {
+  const { t } = useTranslation();
   const searchParams = useSearchParams();
   const initialContent = searchParams.get("first") || "";
 
@@ -149,7 +138,6 @@ function NewJournalContent() {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-resize textarea
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
@@ -157,7 +145,6 @@ function NewJournalContent() {
     }
   }, [content]);
 
-  // Cleanup object URLs on unmount
   useEffect(() => {
     return () => {
       stagedFiles.forEach((f) => URL.revokeObjectURL(f.previewUrl));
@@ -179,7 +166,6 @@ function NewJournalContent() {
     if (e.target.files && e.target.files.length > 0) {
       stageFiles(e.target.files, fileType);
     }
-    // Reset so same file can be re-added if needed
     e.target.value = "";
   };
 
@@ -239,14 +225,14 @@ function NewJournalContent() {
     });
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!auth.currentUser) {
-      setError("You must be logged in to create an entry");
+      setError(t("journalNew.errorNotLoggedIn"));
       return;
     }
     if (!title.trim() || !content.trim()) {
-      setError("Title and content are required");
+      setError(t("journalNew.errorRequiredFields"));
       return;
     }
 
@@ -255,18 +241,17 @@ function NewJournalContent() {
     setError("");
 
     try {
-      // Upload all staged files concurrently with progress tracking
       const uploadResults = await Promise.all(stagedFiles.map(uploadSingleFile));
       const savedMedia: SavedMediaFile[] = uploadResults.filter(Boolean) as SavedMediaFile[];
 
       const failedCount = uploadResults.filter((r) => r === null).length;
       if (failedCount > 0) {
-        setError(`${failedCount} file(s) failed to upload. Entry saved with successful uploads only.`);
+        setError(t("journalNew.errorUploadFailed", { count: failedCount }));
       }
 
       setUploadingMedia(false);
 
-      await addDoc(collection(db, "users", auth.currentUser!.uid, "journals"), {
+      const docRef = await addDoc(collection(db, "users", auth.currentUser!.uid, "journals"), {
         title,
         mood,
         content,
@@ -275,11 +260,10 @@ function NewJournalContent() {
         createdAt: Date.now(),
       });
 
-      // CLEANUP: Revoke all object URLs to free memory
       stagedFiles.forEach((f) => URL.revokeObjectURL(f.previewUrl));
       setStagedFiles([]);
 
-      router.push("/journal");
+      router.push(`/journal/${docRef.id}`);
     } catch (err: any) {
       setError(err.message || "Failed to create entry");
       setSubmitting(false);
@@ -295,13 +279,12 @@ function NewJournalContent() {
       onSubmit={handleSubmit}
       className="flex-1 transition-colors duration-500 bg-background text-foreground font-serif"
     >
-      {/* Top bar */}
       <div className="sticky top-14 z-10 backdrop-blur-sm border-b border-border/40 px-6 py-3 flex items-center justify-between bg-background/95">
         <Link
           href="/journal"
           className="text-sm flex items-center gap-1.5 opacity-50 hover:opacity-80 transition-opacity font-sans"
         >
-          ← Cancel
+          {t("journalNew.cancel")}
         </Link>
 
         <WordCount text={content} />
@@ -316,16 +299,16 @@ function NewJournalContent() {
               {uploadingMedia ? (
                 <>
                   <Upload className="w-3.5 h-3.5 animate-bounce" />
-                  Uploading…
+                  {t("journalNew.uploading")}
                 </>
               ) : (
-                "Saving…"
+                t("journalNew.saving")
               )}
             </>
           ) : (
             <>
               {hasMedia && <Upload className="w-3.5 h-3.5 opacity-70" />}
-              Finish
+              {t("journalNew.finish")}
             </>
           )}
         </button>
@@ -338,40 +321,35 @@ function NewJournalContent() {
           </p>
         )}
 
-        {/* Mood pill */}
         <div className="mb-8">
           <input
             type="text"
             value={mood}
             onChange={(e) => setMood(e.target.value)}
-            placeholder="How are you feeling?"
+            placeholder={t("journalNew.mood")}
             className={`text-sm px-3 py-1.5 rounded-full border bg-transparent outline-none focus:ring-2 transition-all w-2/3 md:w-auto font-sans focus:ring-primary/20 ${palette.accentText} ${palette.accentBorder} ${palette.pill}`}
           />
         </div>
 
-        {/* Title */}
         <input
           type="text"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
-          placeholder="Give this entry a title…"
+          placeholder={t("journalNew.title")}
           className="w-full bg-transparent outline-none text-4xl mb-8 font-light tracking-tight placeholder-muted-foreground/30 font-serif"
         />
 
-        {/* Body */}
         <textarea
           ref={textareaRef}
           value={content}
           onChange={(e) => setContent(e.target.value)}
-          placeholder="What's on your mind today?"
+          placeholder={t("journalNew.content")}
           className="w-full bg-transparent outline-none resize-none text-lg leading-[1.9] overflow-hidden flex-grow placeholder-muted-foreground/30 font-serif"
           style={{ minHeight: "200px" }}
         />
 
-        {/* Media grid */}
         <MediaGrid files={stagedFiles} onRemove={removeStaged} uploading={uploadingMedia} />
 
-        {/* Media toolbar */}
         <div className="flex items-center gap-1 mt-8 pt-4 border-t border-border/40">
           <input
             type="file"
@@ -397,7 +375,7 @@ function NewJournalContent() {
             className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors font-sans px-3 py-2 rounded-lg hover:bg-muted/60 disabled:opacity-40"
           >
             <ImageIcon className="w-4 h-4" />
-            <span>Photos</span>
+            <span>{t("journalNew.photos")}</span>
           </button>
 
           <button
@@ -407,19 +385,22 @@ function NewJournalContent() {
             className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors font-sans px-3 py-2 rounded-lg hover:bg-muted/60 disabled:opacity-40"
           >
             <VideoIcon className="w-4 h-4" />
-            <span>Videos</span>
+            <span>{t("journalNew.videos")}</span>
           </button>
 
           {hasMedia && !submitting && (
             <span className="ml-auto text-xs text-muted-foreground font-sans">
-              {stagedFiles.length} file{stagedFiles.length !== 1 ? "s" : ""} ready to upload
+              {t("journalNew.fileCount", { count: stagedFiles.length })}
             </span>
           )}
 
           {uploadingMedia && (
             <span className="ml-auto text-xs text-muted-foreground font-sans flex items-center gap-1.5">
               <Upload className="w-3 h-3 animate-bounce" />
-              Uploading {stagedFiles.filter((f) => f.uploadProgress === 100).length}/{stagedFiles.length}
+              {t("journalNew.uploadingProgress", {
+                current: stagedFiles.filter((f) => f.uploadProgress === 100).length,
+                total: stagedFiles.length,
+              })}
             </span>
           )}
         </div>
