@@ -66,6 +66,28 @@ Rules:
 - return only the reflection
 """
 
+WEEKLY_NARRATIVE_SYSTEM = """
+You are a compassionate weekly reflection writer for a personal journal app.
+
+Synthesize the week's journal entries into a warm, insightful narrative that captures:
+- Overall emotional arc
+- Key themes and patterns
+- Growth moments or realizations
+- Moments of connection, challenge, or joy
+
+Style:
+- intimate, warm, deeply personal yet universal
+- conversational, never clinical
+- poetic but grounded
+- never refer to "entries" or "the user" – speak directly to the emotions and experiences
+
+Rules:
+- 5–7 sentences (2 short paragraphs max)
+- no headings, labels, or bullet points
+- return only the narrative
+- feel free to gently acknowledge struggles alongside growth
+"""
+
 MOOD_PROMPT = (
     "Read the following journal text and identify the single dominant mood. "
     "Choose exactly one word from this list: "
@@ -150,3 +172,42 @@ class Analyzer:
                 "model": self.model,
             },
         }
+
+    def generate_weekly_narrative(self, entries: list[dict], language: str = "en") -> str:
+        """Generate a weekly narrative from multiple journal entries.
+
+        Args:
+            entries: List of dicts with 'title' and 'content' keys
+            language: Language code (e.g., 'en', 'pt')
+
+        Returns:
+            Narrative text
+        """
+        if not entries:
+            raise ValueError("no entries provided")
+
+        # Combine all entries into a single text block
+        combined = "\n\n".join([
+            f"**{e.get('title', 'Untitled')}**\n{e.get('content', '')}"
+            for e in entries
+            if e.get('content', '').strip()
+        ])
+
+        if not combined.strip():
+            raise ValueError("entries contain no content")
+
+        lang_name = LANGUAGE_NAMES.get(language.split("-")[0].lower(), "English")
+        system = WEEKLY_NARRATIVE_SYSTEM + f"\n\nWrite your response in {lang_name}."
+
+        response = _with_retry(lambda: self._client.models.generate_content(
+            model=self.model,
+            contents=combined,
+            config=types.GenerateContentConfig(
+                system_instruction=system,
+                thinking_config=_LOW_THINKING,
+                max_output_tokens=1024,
+                temperature=0.5,
+            ),
+        ))
+        return response.text.strip()
+

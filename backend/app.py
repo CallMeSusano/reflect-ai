@@ -7,7 +7,7 @@ from fastapi.responses import JSONResponse
 load_dotenv(dotenv_path=Path(__file__).with_name(".env"))
 
 from analyzer import Analyzer
-from schemas import AnalyzeRequest, AnalyzeResponse
+from schemas import AnalyzeRequest, AnalyzeResponse, WeeklyNarrativeRequest, WeeklyNarrativeResponse
 
 
 app = FastAPI(title="ReflectAI - Journal Analyzer")
@@ -47,6 +47,31 @@ async def analyze_file(file: UploadFile = File(...)):
     try:
         result = _analyzer.analyze(text)
         return JSONResponse(status_code=200, content=result)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"analysis failed: {e}")
+
+
+@app.post("/analyze-weekly", response_model=WeeklyNarrativeResponse)
+async def analyze_weekly(req: WeeklyNarrativeRequest):
+    if not req.entries:
+        raise HTTPException(status_code=400, detail="entries are required")
+    try:
+        narrative = _analyzer.generate_weekly_narrative(
+            [{"title": e.title, "content": e.content} for e in req.entries],
+            language=req.language or "en"
+        )
+        return JSONResponse(
+            status_code=200,
+            content={
+                "narrative": narrative,
+                "metadata": {
+                    "num_entries": len(req.entries),
+                    "model": _analyzer.model,
+                },
+            }
+        )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
