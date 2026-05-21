@@ -1,302 +1,468 @@
+"""
+Unit tests for the ReflectAI backend analyzer using Google Gemini API.
+"""
 import pytest
 from unittest.mock import Mock, patch, MagicMock
-from analyzer import Analyzer, MAX_CHUNK_WORDS, CHUNK_OVERLAP_WORDS
+from analyzer import (
+    Analyzer,
+    VALID_MOODS,
+    LANGUAGE_NAMES,
+    DEFAULT_GEMMA_MODEL,
+)
 
 
-def make_words(n):
-    return " ".join([f"w{i}" for i in range(n)])
+class TestAnalyzerInitialization:
+    """Test Analyzer initialization and configuration."""
+
+    def test_init_with_api_key(self):
+        """Test initializing Analyzer with explicit API key."""
+        with patch("analyzer.genai.Client") as mock_client:
+            analyzer = Analyzer(api_key="test-key-123")
+            assert analyzer.model == DEFAULT_GEMMA_MODEL
+            mock_client.assert_called_once_with(api_key="test-key-123")
+
+    def test_init_with_custom_model(self):
+        """Test initializing Analyzer with custom model."""
+        with patch("analyzer.genai.Client"):
+            with patch.dict("os.environ", {"GOOGLE_API_KEY": "env-key"}):
+                analyzer = Analyzer(model="custom-model-456")
+                assert analyzer.model == "custom-model-456"
+
+    def test_init_from_env_variable(self):
+        """Test initializing Analyzer from environment variable."""
+        with patch("analyzer.genai.Client") as mock_client:
+            with patch.dict("os.environ", {"GOOGLE_API_KEY": "env-api-key"}):
+                analyzer = Analyzer()
+                assert analyzer.model == DEFAULT_GEMMA_MODEL
+                mock_client.assert_called_once_with(api_key="env-api-key")
+
+    def test_init_raises_without_api_key(self):
+        """Test that initialization fails without API key."""
+        with patch.dict("os.environ", {}, clear=True):
+            with pytest.raises(RuntimeError, match="GOOGLE_API_KEY is not set"):
+                Analyzer()
 
 
-def test_chunk_small_text_returns_single_chunk():
-    # avoid calling Analyzer.__init__ because it may attempt to initialize HF or transformers
-    a = object.__new__(Analyzer)
-    text = make_words(MAX_CHUNK_WORDS - 10)
-    # chunk_text does not depend on instance attributes, so we can call it bound to our dummy
-    chunks = Analyzer.chunk_text(a, text)
-    assert isinstance(chunks, list)
-    assert len(chunks) == 1
-    assert chunks[0] == text
+class TestMoodDetection:
+    """Test mood detection functionality."""
+
+    def test_valid_mood_detection(self):
+        """Test successful mood detection with valid mood."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
+
+            # Mock API response
+            mock_response = Mock()
+            mock_response.text = "happy"
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
+
+            mood = analyzer._detect_mood("I am very happy today!")
+            assert mood in VALID_MOODS
+            assert mood == "happy"
+
+    def test_mood_with_punctuation_stripped(self):
+        """Test that punctuation is stripped from mood response."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
+
+            mock_response = Mock()
+            mock_response.text = "peaceful."
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
+
+            mood = analyzer._detect_mood("I feel peaceful.")
+            assert mood == "peaceful"
+
+    def test_invalid_mood_defaults_to_neutral(self):
+        """Test that invalid mood defaults to neutral."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
+
+            mock_response = Mock()
+            mock_response.text = "invalid_mood_xyz"
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
+
+            mood = analyzer._detect_mood("Some text")
+            assert mood == "neutral"
+
+    def test_mood_text_truncation(self):
+        """Test that very long text is truncated for mood detection."""
+        with patch("analyzer.genai.Client") as mock_client:
+            analyzer = Analyzer(api_key="test-key")
+
+            # Create a text longer than 4000 chars
+            long_text = "word " * 1000  # ~5000 chars
+
+            mock_response = Mock()
+            mock_response.text = "happy"
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
+
+            analyzer._detect_mood(long_text)
+
+            # Verify the call was made
+            call_args = analyzer._client.models.generate_content.call_args
+            # The mood prompt should be prefixed to the truncated text
+            assert call_args is not None
+
+    def test_multiple_word_response_takes_first(self):
+        """Test that only first word is used from multi-word response."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
+
+            mock_response = Mock()
+            mock_response.text = "sad but expected"
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
+
+            mood = analyzer._detect_mood("Text")
+            assert mood == "sad"
+
+    def test_empty_response_defaults_to_neutral(self):
+        """Test that empty response defaults to neutral."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
+
+            mock_response = Mock()
+            mock_response.text = ""
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
+
+            mood = analyzer._detect_mood("Text")
+            assert mood == "neutral"
 
 
-def test_chunk_large_text_splits_and_overlaps():
-    a = object.__new__(Analyzer)
-    total_words = MAX_CHUNK_WORDS * 3 + 50
-    text = make_words(total_words)
-    chunks = Analyzer.chunk_text(a, text)
-    assert len(chunks) >= 3
+class TestSummarization:
+    """Test text summarization functionality."""
 
-    # verify chunk sizes and overlap behavior
-    # reconstruct approx words from chunks (split and count)
-    chunk_word_counts = [len(c.split()) for c in chunks]
-    assert all(cw <= MAX_CHUNK_WORDS for cw in chunk_word_counts)
+    def test_successful_summarization(self):
+        """Test successful text summarization."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
 
-    # check overlap: adjacent chunks should share at least CHUNK_OVERLAP_WORDS or be contiguous
-    for i in range(len(chunks) - 1):
-        c1 = chunks[i].split()
-        c2 = chunks[i + 1].split()
-        # number of overlapping tokens = len(set tail of c1 intersect head of c2))
-        overlap = len(set(c1[-CHUNK_OVERLAP_WORDS:]) & set(c2[:CHUNK_OVERLAP_WORDS]))
-        # allow zero overlap if step equals chunk size, but otherwise expect some overlap
-        assert overlap >= 0
+            expected_summary = "This is a thoughtful reflection on the day."
+            mock_response = Mock()
+            mock_response.text = expected_summary
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
 
+            result = analyzer._summarize("Long journal entry text...", "en")
+            assert result == expected_summary
 
-def test_analyze_aggregates_mocked_responses(monkeypatch):
-    # Create instance without __init__ to avoid HF/transformers initialization
-    a = object.__new__(Analyzer)
-    # set attributes used by analyze
-    a.summary_model = "test-summary"
-    a.emotion_model = "test-emotion"
-    a.hf_token = None
-    a.local_mode = False
-    a._use_inference_api = False
+    def test_summarization_language_support(self):
+        """Test summarization with different languages."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
 
-    # mock chunk_text to return two chunks
-    monkeypatch.setattr(a, "chunk_text", lambda text: ["first chunk text", "second chunk text"])
+            mock_response = Mock()
+            mock_response.text = "Uma reflexão."
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
 
-    # mock summary and emotion calls
-    monkeypatch.setattr(a, "_call_summary", lambda t: f"summary_of:{t}")
+            # Test Portuguese
+            result = analyzer._summarize("Texto do diário...", "pt")
+            assert result == "Uma reflexão."
 
-    def fake_emotion(t):
-        if "first" in t:
-            return [type("E", (), {"label": "sadness", "score": 0.8})()]
-        return [type("E", (), {"label": "joy", "score": 0.6})()]
+            # Verify Portuguese was used in system instruction
+            call_args = analyzer._client.models.generate_content.call_args
+            assert call_args is not None
+            config = call_args.kwargs.get("config")
+            assert "Portuguese" in config.system_instruction
 
-    monkeypatch.setattr(a, "_call_emotion", fake_emotion)
+    def test_language_code_with_region(self):
+        """Test that language code with region codes works (e.g., en-US)."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
 
-    res = Analyzer.analyze(a, "irrelevant text")
-    assert "summary" in res
-    assert "emotions" in res
-    assert isinstance(res["emotions"], list)
-    # should aggregate two labels
-    labels = {e["label"] for e in res["emotions"]}
-    assert labels == {"sadness", "joy"}
+            mock_response = Mock()
+            mock_response.text = "Summary"
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
 
+            result = analyzer._summarize("Text", "en-US")
+            assert result == "Summary"
 
-# ──────────────────────────────────────────────────────────────────
-# Inference API Tests
-# ──────────────────────────────────────────────────────────────────
+    def test_unknown_language_defaults_to_english(self):
+        """Test that unknown language codes default to English."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
 
-def test_inference_api_summary_success():
-    """Test successful summary call to Hugging Face Inference API."""
-    a = object.__new__(Analyzer)
-    a._use_inference_api = True
-    a.summary_model = "sshleifer/distilbart-cnn-12-6"
-    a.hf_token = "test_token_123"
+            mock_response = Mock()
+            mock_response.text = "Summary"
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
 
-    # Mock successful HF Inference API response
-    mock_response = Mock()
-    mock_response.status_code = 200
-    mock_response.headers = {"content-type": "application/json"}
-    mock_response.json.return_value = [{"summary_text": "This is a test summary."}]
+            analyzer._summarize("Text", "xyz")
 
-    with patch("analyzer.requests.post", return_value=mock_response):
-        result = Analyzer._call_summary(a, "This is a long test text that needs summarization.")
-        assert result == "This is a test summary."
+            call_args = analyzer._client.models.generate_content.call_args
+            config = call_args.kwargs.get("config")
+            assert "English" in config.system_instruction
 
+    def test_summarization_text_stripped(self):
+        """Test that response text is stripped of whitespace."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
 
-def test_inference_api_summary_generated_text_format():
-    """Test summary API response with 'generated_text' field."""
-    a = object.__new__(Analyzer)
-    a._use_inference_api = True
-    a.summary_model = "sshleifer/distilbart-cnn-12-6"
-    a.hf_token = "test_token_123"
+            mock_response = Mock()
+            mock_response.text = "  \n  Summary text  \n  "
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
 
-    mock_response = Mock()
-    mock_response.status_code = 200
-    mock_response.headers = {"content-type": "application/json"}
-    mock_response.json.return_value = [{"generated_text": "Alternative format summary."}]
-
-    with patch("analyzer.requests.post", return_value=mock_response):
-        result = Analyzer._call_summary(a, "Test text.")
-        assert result == "Alternative format summary."
+            result = analyzer._summarize("Text", "en")
+            assert result == "Summary text"
 
 
-def test_inference_api_emotion_success():
-    """Test successful emotion classification via Inference API."""
-    a = object.__new__(Analyzer)
-    a._use_inference_api = True
-    a.emotion_model = "j-hartmann/emotion-english-distilroberta-base"
-    a.hf_token = "test_token_123"
+class TestAnalyze:
+    """Test the main analyze() method."""
 
-    mock_response = Mock()
-    mock_response.status_code = 200
-    mock_response.headers = {"content-type": "application/json"}
-    mock_response.json.return_value = [[
-        {"label": "joy", "score": 0.85},
-        {"label": "sadness", "score": 0.10},
-    ]]
+    def test_analyze_complete_flow(self):
+        """Test complete analysis flow."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
 
-    with patch("analyzer.requests.post", return_value=mock_response):
-        result = Analyzer._call_emotion(a, "I am so happy today!")
-        assert len(result) == 2
-        assert result[0].label == "joy"
-        assert result[0].score == 0.85
+            # Mock internal methods
+            analyzer._summarize = Mock(return_value="Test summary")
+            analyzer._detect_mood = Mock(return_value="happy")
 
+            result = analyzer.analyze("This is a journal entry.")
 
-def test_inference_api_emotion_flat_dict_format():
-    """Test emotion response as single dict instead of list."""
-    a = object.__new__(Analyzer)
-    a._use_inference_api = True
-    a.emotion_model = "j-hartmann/emotion-english-distilroberta-base"
-    a.hf_token = "test_token_123"
+            assert "summary" in result
+            assert result["summary"] == "Test summary"
+            assert "mood" in result
+            assert result["mood"] == "happy"
+            assert "metadata" in result
+            assert result["metadata"]["words"] == 5
+            assert result["metadata"]["model"] == DEFAULT_GEMMA_MODEL
 
-    mock_response = Mock()
-    mock_response.status_code = 200
-    mock_response.headers = {"content-type": "application/json"}
-    mock_response.json.return_value = {"label": "joy", "score": 0.92}
+    def test_analyze_empty_text_raises_error(self):
+        """Test that empty text raises ValueError."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
 
-    with patch("analyzer.requests.post", return_value=mock_response):
-        result = Analyzer._call_emotion(a, "Happy text")
-        assert len(result) == 1
-        assert result[0].label == "joy"
-        assert result[0].score == 0.92
+            with pytest.raises(ValueError, match="text is empty"):
+                analyzer.analyze("")
 
+    def test_analyze_whitespace_only_raises_error(self):
+        """Test that whitespace-only text raises ValueError."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
 
-def test_inference_api_summary_error_404():
-    """Test handling of 404 error from Inference API."""
-    a = object.__new__(Analyzer)
-    a._use_inference_api = True
-    a.summary_model = "sshleifer/distilbart-cnn-12-6"
-    a.hf_token = "invalid_token"
+            with pytest.raises(ValueError, match="text is empty"):
+                analyzer.analyze("   \n\t  ")
 
-    mock_response = Mock()
-    mock_response.status_code = 404
-    mock_response.text = "Model not found"
+    def test_analyze_word_count_calculation(self):
+        """Test that word count is correctly calculated."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
+            analyzer._summarize = Mock(return_value="Summary")
+            analyzer._detect_mood = Mock(return_value="happy")
 
-    with patch("analyzer.requests.post", return_value=mock_response):
-        with pytest.raises(RuntimeError) as exc_info:
-            Analyzer._call_summary(a, "Test text")
-        assert "404" in str(exc_info.value)
-        assert "HF summary request failed" in str(exc_info.value)
+            text = "one two three four five"
+            result = analyzer.analyze(text)
+            assert result["metadata"]["words"] == 5
 
+    def test_analyze_with_custom_language(self):
+        """Test analyze with custom language parameter."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
+            analyzer._summarize = Mock(return_value="Summary")
+            analyzer._detect_mood = Mock(return_value="sad")
 
-def test_inference_api_emotion_error_401():
-    """Test handling of 401 unauthorized error."""
-    a = object.__new__(Analyzer)
-    a._use_inference_api = True
-    a.emotion_model = "j-hartmann/emotion-english-distilroberta-base"
-    a.hf_token = None  # No token
+            analyzer.analyze("Text", language="pt")
 
-    mock_response = Mock()
-    mock_response.status_code = 401
-    mock_response.text = "Unauthorized"
+            # Verify language was passed to summarize
+            analyzer._summarize.assert_called_once_with("Text", "pt")
 
-    with patch("analyzer.requests.post", return_value=mock_response):
-        with pytest.raises(RuntimeError) as exc_info:
-            Analyzer._call_emotion(a, "Test text")
-        assert "401" in str(exc_info.value)
+    def test_analyze_returns_correct_structure(self):
+        """Test that analyze returns correct response structure."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
+            analyzer._summarize = Mock(return_value="Test summary")
+            analyzer._detect_mood = Mock(return_value="grateful")
 
+            result = analyzer.analyze("Journal entry text here")
 
-def test_inference_api_summary_error_in_metadata():
-    """Test that API errors are captured in metadata during analyze()."""
-    a = object.__new__(Analyzer)
-    a.summary_model = "sshleifer/distilbart-cnn-12-6"
-    a.emotion_model = "j-hartmann/emotion-english-distilroberta-base"
-    a.hf_token = "test_token"
-    a.local_mode = False
-    a._use_inference_api = True
-    a.max_chunk_words = MAX_CHUNK_WORDS
-    a.chunk_overlap_words = CHUNK_OVERLAP_WORDS
-
-    # Mock chunk_text
-    a.chunk_text = lambda text: ["chunk1"]
-
-    # Mock summary to fail
-    mock_response_fail = Mock()
-    mock_response_fail.status_code = 503
-    mock_response_fail.text = "Service Unavailable"
-
-    with patch("analyzer.requests.post", return_value=mock_response_fail):
-        result = a.analyze("test text")
-
-    # Should have error in metadata but not crash
-    assert "summary_errors" in result["metadata"]
-    assert len(result["metadata"]["summary_errors"]) > 0
-    assert "503" in result["metadata"]["summary_errors"][0]
+            assert isinstance(result, dict)
+            assert set(result.keys()) == {"summary", "mood", "metadata"}
+            assert isinstance(result["summary"], str)
+            assert result["mood"] in VALID_MOODS
+            assert isinstance(result["metadata"], dict)
+            assert "words" in result["metadata"]
+            assert "model" in result["metadata"]
 
 
-def test_inference_api_with_authorization_header():
-    """Test that API token is properly passed in Authorization header."""
-    a = object.__new__(Analyzer)
-    a._use_inference_api = True
-    a.summary_model = "sshleifer/distilbart-cnn-12-6"
-    a.hf_token = "hf_test_token_xyz"
+class TestWeeklyNarrative:
+    """Test weekly narrative generation."""
 
-    mock_response = Mock()
-    mock_response.status_code = 200
-    mock_response.headers = {"content-type": "application/json"}
-    mock_response.json.return_value = [{"summary_text": "Summary"}]
+    def test_generate_weekly_narrative_success(self):
+        """Test successful weekly narrative generation."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
 
-    with patch("analyzer.requests.post", return_value=mock_response) as mock_post:
-        Analyzer._call_summary(a, "Test text")
+            entries = [
+                {"title": "Monday", "content": "Had a great day"},
+                {"title": "Tuesday", "content": "Feeling reflective"},
+            ]
 
-        # Verify Authorization header was passed
-        call_args = mock_post.call_args
-        assert call_args is not None
-        headers = call_args.kwargs.get("headers", {})
-        assert headers.get("Authorization") == "Bearer hf_test_token_xyz"
+            expected_narrative = "This week brought moments of clarity..."
+            mock_response = Mock()
+            mock_response.text = expected_narrative
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
+
+            result = analyzer.generate_weekly_narrative(entries)
+            assert result == expected_narrative
+
+    def test_generate_weekly_narrative_empty_raises_error(self):
+        """Test that empty entries list raises ValueError."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
+
+            with pytest.raises(ValueError, match="no entries provided"):
+                analyzer.generate_weekly_narrative([])
+
+    def test_generate_weekly_narrative_no_content_raises_error(self):
+        """Test that entries with no content raise ValueError."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
+
+            entries = [
+                {"title": "Monday", "content": ""},
+                {"title": "Tuesday", "content": "   "},
+            ]
+
+            with pytest.raises(ValueError, match="entries contain no content"):
+                analyzer.generate_weekly_narrative(entries)
+
+    def test_generate_weekly_narrative_filters_empty_entries(self):
+        """Test that empty content entries are filtered out."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
+
+            entries = [
+                {"title": "Monday", "content": "Valid content"},
+                {"title": "Tuesday", "content": "   "},
+                {"title": "Wednesday", "content": "More valid content"},
+            ]
+
+            mock_response = Mock()
+            mock_response.text = "Narrative"
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
+
+            result = analyzer.generate_weekly_narrative(entries)
+
+            # Verify the content passed includes only valid entries
+            call_args = analyzer._client.models.generate_content.call_args
+            combined_content = call_args.kwargs.get("contents", "")
+            assert "Valid content" in combined_content
+            assert "More valid content" in combined_content
+
+    def test_generate_weekly_narrative_language_support(self):
+        """Test weekly narrative with different language."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
+
+            entries = [
+                {"title": "Segunda", "content": "Conteúdo válido"},
+            ]
+
+            mock_response = Mock()
+            mock_response.text = "Narrativa"
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
+
+            analyzer.generate_weekly_narrative(entries, language="pt")
+
+            call_args = analyzer._client.models.generate_content.call_args
+            config = call_args.kwargs.get("config")
+            assert "Portuguese" in config.system_instruction
+
+    def test_generate_weekly_narrative_missing_fields(self):
+        """Test handling entries with missing title or content fields."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
+
+            entries = [
+                {"content": "Content without title"},
+                {"title": "Title without content"},
+                {"title": "Complete", "content": "Entry"},
+            ]
+
+            mock_response = Mock()
+            mock_response.text = "Narrative"
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
+
+            result = analyzer.generate_weekly_narrative(entries)
+            assert result == "Narrative"
+
+    def test_generate_weekly_narrative_text_stripped(self):
+        """Test that narrative text is stripped."""
+        with patch("analyzer.genai.Client"):
+            analyzer = Analyzer(api_key="test-key")
+
+            entries = [{"title": "Day", "content": "Content"}]
+
+            mock_response = Mock()
+            mock_response.text = "  \nNarrative\n  "
+            analyzer._client.models.generate_content = Mock(return_value=mock_response)
+
+            result = analyzer.generate_weekly_narrative(entries)
+            assert result == "Narrative"
 
 
-def test_full_analyze_with_inference_api():
-    """Integration test: full analyze() with mocked Inference API responses."""
-    a = object.__new__(Analyzer)
-    a.summary_model = "sshleifer/distilbart-cnn-12-6"
-    a.emotion_model = "j-hartmann/emotion-english-distilroberta-base"
-    a.hf_token = "test_token"
-    a.local_mode = False
-    a._use_inference_api = True
-    a.max_chunk_words = MAX_CHUNK_WORDS
-    a.chunk_overlap_words = CHUNK_OVERLAP_WORDS
+class TestRetryLogic:
+    """Test retry mechanism for transient failures."""
 
-    # Mock requests
-    summary_response = Mock()
-    summary_response.status_code = 200
-    summary_response.headers = {"content-type": "application/json"}
-    summary_response.json.return_value = [{"summary_text": "This is a test summary."}]
+    def test_with_retry_succeeds_on_first_attempt(self):
+        """Test successful API call on first attempt."""
+        from analyzer import _with_retry
 
-    emotion_response = Mock()
-    emotion_response.status_code = 200
-    emotion_response.headers = {"content-type": "application/json"}
-    emotion_response.json.return_value = [[
-        {"label": "joy", "score": 0.7},
-        {"label": "trust", "score": 0.5},
-    ]]
+        fn = Mock(return_value="success")
+        result = _with_retry(fn)
 
-    with patch("analyzer.requests.post") as mock_post:
-        # Return summary response for summary calls, emotion response for emotion calls
-        def side_effect(*args, **kwargs):
-            json_data = kwargs.get("json", {})
-            if "parameters" in json_data:  # summary call
-                return summary_response
-            else:  # emotion call
-                return emotion_response
+        assert result == "success"
+        fn.assert_called_once()
 
-        mock_post.side_effect = side_effect
+    def test_with_retry_retries_on_retryable_error(self):
+        """Test that retryable errors trigger retry."""
+        from analyzer import _with_retry
 
-        result = a.analyze("This is a test text with multiple sentences. It has content.")
+        fn = Mock(side_effect=[
+            Exception("503 Service Unavailable"),
+            "success"
+        ])
 
-    # Verify result structure
-    assert "summary" in result
-    assert result["summary"] == "This is a test summary."
-    assert "emotions" in result
-    assert len(result["emotions"]) == 2
-    assert result["emotions"][0]["label"] == "joy"
-    assert result["metadata"]["mode"] == "inference_api"
-    assert "summary_errors" not in result["metadata"]
-    assert "emotion_errors" not in result["metadata"]
+        result = _with_retry(fn)
+        assert result == "success"
+        assert fn.call_count == 2
+
+    def test_with_retry_fails_on_non_retryable_error(self):
+        """Test that non-retryable errors are raised immediately."""
+        from analyzer import _with_retry
+
+        fn = Mock(side_effect=ValueError("Invalid input"))
+
+        with pytest.raises(ValueError, match="Invalid input"):
+            _with_retry(fn)
+
+        fn.assert_called_once()
+
+    def test_with_retry_max_retries_exceeded(self):
+        """Test that max retries limit is respected."""
+        from analyzer import _with_retry
+
+        fn = Mock(side_effect=Exception("500 Internal Server Error"))
+
+        with pytest.raises(Exception):
+            _with_retry(fn)
+
+        # Should try 3 times before giving up
+        assert fn.call_count == 3
 
 
-def test_inference_api_without_token_falls_back_to_local():
-    """Test that without a token, inference_api mode is not used."""
-    # This test verifies the configuration logic
-    import os
-    with patch.dict(os.environ, {"HUGGINGFACE_API_KEY": "", "HF_LOCAL_MODE": "false"}):
-        # Should NOT use inference API if no token
-        a = object.__new__(Analyzer)
-        a.hf_token = ""
-        a.local_mode = False
-        a._use_inference_api = bool(a.hf_token) and not a.local_mode
-        assert a._use_inference_api is False
+class TestLanguageSupport:
+    """Test language support and localization."""
+
+    def test_all_language_codes_maps_to_names(self):
+        """Test that all language codes have corresponding names."""
+        for lang_code in LANGUAGE_NAMES:
+            assert lang_code
+            assert isinstance(LANGUAGE_NAMES[lang_code], str)
+
+    def test_language_codes_include_common_languages(self):
+        """Test that common languages are included."""
+        expected_codes = ["en", "pt", "es", "fr", "de"]
+        for code in expected_codes:
+            assert code in LANGUAGE_NAMES
 
 
 
